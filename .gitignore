@@ -1,0 +1,28 @@
+# Data files
+data/
+*.parquet
+*.csv
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+
+# Secrets
+.env
+librechat.env
+*.pem
+*.key
+
+# OS
+.DS_Store
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/

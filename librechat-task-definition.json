@@ -1,0 +1,59 @@
+{
+  "family": "librechat",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "containerDefinitions": [
+    {
+      "name": "librechat",
+      "image": "ghcr.io/danny-avila/librechat-dev:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "HOST",
+          "value": "0.0.0.0"
+        },
+        {
+          "name": "PORT",
+          "value": "3080"
+        },
+        {
+          "name": "MONGO_URI",
+          "value": "mongodb+srv://admin:buildcanada@librechat-cluster.ygmktuq.mongodb.net/?retryWrites=true&w=majority&appName=librechat-cluster"
+        },
+        {
+          "name": "JWT_SECRET",
+          "value": "KsO7AViqj0F6Fbmy8mVe7gzBDtVAJxH9WdXpRjVMyRA="
+        },
+        {
+          "name": "JWT_REFRESH_SECRET",
+          "value": "vr9zZcm5IjLG3gxt8nb0vNeRjqiNAKvUP9u013tFkag="
+        },
+        {
+          "name": "DOMAIN_CLIENT",
+          "value": "http://localhost:3080"
+        },
+        {
+          "name": "DOMAIN_SERVER",
+          "value": "http://localhost:3080"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/librechat",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "librechat",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

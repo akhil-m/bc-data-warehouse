@@ -1,0 +1,106 @@
+{
+    "family": "librechat",
+    "containerDefinitions": [
+        {
+            "cpu": 0,
+            "environment": [
+                {
+                    "name": "HOST",
+                    "value": "0.0.0.0"
+                }
+            ],
+            "environmentFiles": [
+                {
+                    "type": "s3",
+                    "value": "arn:aws:s3:::build-cananda-dw/librechat.env"
+                }
+            ],
+            "essential": true,
+            "image": "969378265316.dkr.ecr.us-east-2.amazonaws.com/librechat-custom:latest",
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/",
+                    "awslogs-create-group": "true",
+                    "awslogs-region": "us-east-2",
+                    "awslogs-stream-prefix": "ecs"
+                }
+            },
+            "mountPoints": [],
+            "name": "librechat",
+            "portMappings": [
+                {
+                    "appProtocol": "http",
+                    "containerPort": 3080,
+                    "hostPort": 3080,
+                    "name": "librechat-3080-tcp",
+                    "protocol": "tcp"
+                }
+            ],
+            "systemControls": [],
+            "volumesFrom": []
+        },
+        {
+            "cpu": 0,
+            "environment": [
+                {
+                    "name": "AWS_REGION",
+                    "value": "us-east-2"
+                }
+            ],
+            "essential": false,
+            "image": "969378265316.dkr.ecr.us-east-2.amazonaws.com/fastmcp-athena:latest",
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/",
+                    "awslogs-create-group": "true",
+                    "awslogs-region": "us-east-2",
+                    "awslogs-stream-prefix": "ecs"
+                }
+            },
+            "name": "fastmcp",
+            "portMappings": [
+                {
+                    "containerPort": 8000,
+                    "protocol": "tcp"
+                }
+            ]
+        },
+        {
+            "cpu": 0,
+            "command": [
+                "tunnel",
+                "--url",
+                "http://localhost:3080"
+            ],
+            "essential": false,
+            "image": "cloudflare/cloudflared:latest",
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/",
+                    "awslogs-create-group": "true",
+                    "awslogs-region": "us-east-2",
+                    "awslogs-stream-prefix": "ecs"
+                }
+            },
+            "name": "cloudflared"
+        }
+    ],
+    "executionRoleArn": "arn:aws:iam::969378265316:role/ecsTaskExecutionRole",
+    "taskRoleArn": "arn:aws:iam::969378265316:role/ecsTaskExecutionRole",
+    "networkMode": "awsvpc",
+    "volumes": [],
+    "placementConstraints": [],
+    "requiresCompatibilities": [
+        "FARGATE"
+    ],
+    "cpu": "512",
+    "memory": "1024",
+    "runtimePlatform": {
+        "cpuArchitecture": "X86_64",
+        "operatingSystemFamily": "LINUX"
+    },
+    "enableFaultInjection": false
+}

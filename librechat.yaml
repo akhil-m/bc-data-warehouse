@@ -1,0 +1,8 @@
+version: 1.0.0
+cache: true
+
+mcpServers:
+  statscan:
+    type: streamable-http
+    url: http://localhost:8000/mcp
+    serverInstructions: true
