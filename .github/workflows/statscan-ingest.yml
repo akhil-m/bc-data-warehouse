@@ -1,0 +1,55 @@
+name: Ingest StatsCan Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Max datasets (leave empty for no limit)'
+        required: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: us-east-2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pandas boto3 requests pyarrow
+
+      - name: Download base catalogs
+        run: |
+          aws s3 cp s3://build-cananda-dw/statscan/catalog.parquet catalog.parquet
+          aws s3 cp s3://build-cananda-dw/statscan/immigration_catalog.parquet immigration_catalog.parquet
+
+      - name: Run ingestion
+        env:
+          LIMIT: ${{ github.event.inputs.limit }}
+        run: python ingest_all.py
+
+      - name: Upload to S3
+        run: ./upload_to_s3.sh
+
+      - name: Regenerate catalog
+        run: python regenerate_catalog.py
+
+      - name: Update Glue crawler
+        run: python update_crawler.py
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingestion-manifest
+          path: |
+            ingested.csv
+            dataset_folders.txt

@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+import utils
 
 
 API_BASE = "https://www150.statcan.gc.ca/t1/wds/rest"
@@ -124,12 +125,9 @@ def main():
     # Load catalog
     catalog = pd.read_parquet('immigration_catalog.parquet')
 
-    # Skip already downloaded datasets
-    existing = set()
-    for pf in Path('data').glob('*/*.parquet'):
-        existing.add(int(pf.stem))
-
-    print(f"Already have {len(existing)} datasets locally")
+    # Skip datasets already in S3
+    existing = utils.get_existing_dataset_ids('statscan')
+    print(f"Already have {len(existing)} datasets in S3")
     catalog = catalog[~catalog['productId'].isin(existing)]
 
     # Skip INVISIBLE datasets (massive internal tables, do later)
