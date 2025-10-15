@@ -1,0 +1,15 @@
+[settings]
+python.uv_venv_auto = true
+
+[env]
+_.python.venv = ".venv"
+
+[tools]
+python = "3.13"
+uv = "latest"
+
+[tasks.install]
+run = "uv pip install -e ."
+
+[tasks.discover]
+run = "python discover.py"

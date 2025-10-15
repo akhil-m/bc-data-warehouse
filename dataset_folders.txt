@@ -138,6 +138,14 @@
 16100044-tobacco-sales-and-inventories-monthly-production
 17100005-population-estimates-on-july-1-by-age-and-gender
 17100006-estimates-of-deaths-by-age-and-gender-annual
+17100014-estimates-of-the-components-of-international-migration-by-age-and-gender-annual
+17100015-estimates-of-the-components-of-interprovincial-migration-by-age-and-gender-annual
+17100020-estimates-of-the-components-of-interprovincial-migration-quarterly
+17100021-estimates-of-the-components-of-interprovincial-migration-annual
+17100022-estimates-of-interprovincial-migrants-by-province-or-territory-of-origin-and-destination-annual
+17100040-estimates-of-the-components-of-international-migration-quarterly
+17100045-estimates-of-interprovincial-migrants-by-province-or-territory-of-origin-and-destination-quarterly
+17100121-estimates-of-the-number-of-non-permanent-residents-by-type-quarterly
 17100158-estimates-of-the-number-of-non-permanent-residents-on-july-1-by-age-and-gender
 18100283-machinery-and-equipment-price-index-by-commodity-monthly
 18100284-machinery-and-equipment-price-index-by-industry-of-purchase-monthly
@@ -238,6 +246,11 @@
 38100133-capital-and-operating-expenditures-on-pollution-prevention-and-pollution-abatement-and-control-by-industry
 38100235-financial-indicators-of-households-and-non-profit-institutions-serving-households-national-balance-sheet-accounts
 38100285-natural-resources-satellite-account-indicators
+43100025-economic-outcomes-of-taxfiling-immigrants-admitted-as-children-compared-to-canadian-taxfilers-by-age-at-taxation-in-2017-inactive
+43100031-economic-outcomes-of-taxfiling-immigrants-admitted-as-children-compared-to-canadian-taxfilers-by-age-at-taxation-in-2018-inactive
+43100047-immigrant-income-by-world-area-quebec-inactive
+43100050-immigrant-income-by-period-of-immigration-canada-inactive
+43100075-economic-outcomes-of-taxfiling-immigrants-admitted-as-children-compared-to-canadian-taxfilers-by-age-at-taxation-in-2022
 45100068-satisfaction-with-time-use-for-preferred-activities-by-gender-and-other-selected-sociodemographic-characteristics
 45100070-satisfaction-with-local-environment-by-gender-and-other-selected-sociodemographic-characteristics
 45100072-satisfaction-with-personal-relationships-by-gender-and-other-selected-sociodemographic-characteristics
@@ -247,5 +260,10 @@
 46100073-persons-in-core-housing-need-by-tenure-including-first-time-homebuyer-and-social-and-affordable-housing-status-by-province
 46100082-dwelling-and-neighbourhood-satisfaction-by-tenure-including-social-and-affordable-housing-and-structural-type-of-dwelling
 46100096-residential-property-owners-by-number-of-residential-properties-owned-and-demographic-characteristics
+46100098-residential-property-owners-by-immigration-characteristics
 46100099-price-to-income-ratio-of-residential-property-buyers-by-first-time-home-buyer-status
 98100030-broad-age-groups-gender-and-census-year-canada-provinces-and-territories-census-metropolitan-areas-and-census-agglomerations-with-parts
+98100399-employment-income-statistics-by-visible-minority-immigrant-status-highest-level-of-education-and-location-of-study-canada-provinces-and-territories
+98100524-languages-used-at-work-by-languages-used-at-home-immigrant-status-and-period-of-immigration-canada-provinces-and-territories-census-metropolitan-areas-and-census-agglomerations-with-parts
+98100530-languages-used-at-work-by-employment-income-statistics-immigrant-status-and-highest-certificate-diploma-or-degree-canada-provinces-and-territories-census-metropolitan-areas-and-census-agglomerations-with-parts
+catalog

@@ -1,0 +1,10 @@
+[project]
+name = "statscan-warehouse"
+version = "0.1.0"
+description = "Canadian statistics data warehouse"
+requires-python = ">=3.13"
+dependencies = [
+    "requests>=2.31.0",
+    "pandas>=2.2.0",
+    "pyarrow>=15.0.0",
+]

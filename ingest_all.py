@@ -4,8 +4,8 @@
 import pandas as pd
 import requests
 import zipfile
+import tempfile
 from pathlib import Path
-from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
@@ -13,7 +13,7 @@ import threading
 API_BASE = "https://www150.statcan.gc.ca/t1/wds/rest"
 MAX_TOTAL_GB = 10  # Just immigration data
 MAX_DOWNLOAD_MB = 5000  # Skip CSV files larger than this
-NUM_WORKERS = 8  # Parallel download/conversion workers
+NUM_WORKERS = 1  # Sequential processing to avoid memory exhaustion
 
 
 def download_table(product_id, title):
@@ -32,40 +32,50 @@ def download_table(product_id, title):
     data = resp.json()
     zip_url = data['object']
 
-    # Download ZIP with progress
+    # Check file size BEFORE downloading
+    head_resp = requests.head(zip_url, headers=headers, timeout=30)
+    head_resp.raise_for_status()
+    total_size = int(head_resp.headers.get('content-length', 0))
+
+    if total_size > MAX_DOWNLOAD_MB * 1e6:
+        print(f"{display_title} - Skipped (>{MAX_DOWNLOAD_MB}MB, {total_size/1e6:.0f}MB)")
+        return None
+
+    # Stream ZIP to temp file on disk
     zip_resp = requests.get(zip_url, headers=headers, timeout=120, stream=True)
     zip_resp.raise_for_status()
 
-    # Get total size if available
-    total_size = int(zip_resp.headers.get('content-length', 0))
-
-    chunks = []
     downloaded = 0
     last_pct = -1
 
-    for chunk in zip_resp.iter_content(chunk_size=1024*1024):  # 1MB chunks
-        chunks.append(chunk)
-        downloaded += len(chunk)
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_zip:
+        for chunk in zip_resp.iter_content(chunk_size=1024*1024):  # 1MB chunks
+            tmp_zip.write(chunk)
+            downloaded += len(chunk)
 
-        # Check if file is too large
-        if downloaded > MAX_DOWNLOAD_MB * 1e6:
-            print(f"{display_title} - Skipped (>{MAX_DOWNLOAD_MB}MB)")
-            return None
+            # Print progress every 10%
+            if total_size > 0:
+                pct = int(100 * downloaded / total_size)
+                if pct >= last_pct + 10:
+                    print(f"{display_title} - Downloading {downloaded/1e6:.0f}/{total_size/1e6:.0f}MB ({pct}%)")
+                    last_pct = pct
 
-        # Print progress every 10%
-        if total_size > 0:
-            pct = int(100 * downloaded / total_size)
-            if pct >= last_pct + 10:
-                print(f"{display_title} - Downloading {downloaded/1e6:.0f}/{total_size/1e6:.0f}MB ({pct}%)")
-                last_pct = pct
+        zip_path = tmp_zip.name
 
-    zip_content = b''.join(chunks)
-    print(f"{display_title} - Downloaded, converting...")
+    print(f"{display_title} - Downloaded, extracting...")
 
-    with zipfile.ZipFile(BytesIO(zip_content)) as z:
-        csv_name = z.namelist()[0]
-        with z.open(csv_name) as f:
-            df = pd.read_csv(f, low_memory=False)
+    # Extract CSV to temp directory
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        with zipfile.ZipFile(zip_path) as z:
+            csv_name = z.namelist()[0]
+            csv_path = z.extract(csv_name, tmp_dir)
+
+        # Load CSV from disk
+        print(f"{display_title} - Converting to parquet...")
+        df = pd.read_csv(csv_path, low_memory=False)
+
+    # Clean up temp ZIP
+    Path(zip_path).unlink()
 
     # Sanitize column names for parquet/avro compatibility
     df.columns = [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in df.columns]
