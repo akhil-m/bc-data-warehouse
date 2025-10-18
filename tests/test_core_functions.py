@@ -1,7 +1,7 @@
 """Tests for pure core functions in ingest_all.py."""
 
 import pandas as pd
-import ingest_all
+from src.pipeline import ingest_all
 
 
 class TestSanitizeColumnNames:

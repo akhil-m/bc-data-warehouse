@@ -1,7 +1,7 @@
 """Tests for Glue crawler update functions."""
 
 from unittest.mock import MagicMock, patch, mock_open
-import update_crawler
+from src.pipeline import update_crawler
 
 
 class TestParseFolderList:

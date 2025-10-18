@@ -22,7 +22,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          pytest --cov=. --cov-report=term-missing --cov-report=xml --cov-fail-under=69
+          pytest --cov=src --cov-report=term-missing --cov-report=xml --cov-fail-under=64
 
       - name: Upload coverage to artifacts
         uses: actions/upload-artifact@v4

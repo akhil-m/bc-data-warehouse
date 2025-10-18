@@ -3,7 +3,7 @@
 
 import pandas as pd
 import boto3
-import utils
+from . import utils
 
 
 # === Functional Core (Pure Functions - No I/O) ===

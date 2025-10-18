@@ -1,7 +1,7 @@
 """Tests for S3 utility functions."""
 
 from unittest.mock import MagicMock, patch
-import utils
+from src.pipeline import utils
 
 
 class TestExtractProductIdFromFolder:

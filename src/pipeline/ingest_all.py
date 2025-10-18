@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
-import utils
+from . import utils
 
 
 API_BASE = "https://www150.statcan.gc.ca/t1/wds/rest"

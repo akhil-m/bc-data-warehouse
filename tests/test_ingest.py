@@ -3,15 +3,15 @@
 import os
 import pandas as pd
 from unittest.mock import patch, MagicMock
-import ingest_all
+from src.pipeline import ingest_all
 
 
 class TestLimitHandling:
     """Test LIMIT environment variable handling."""
 
-    @patch('ingest_all.ThreadPoolExecutor')
-    @patch('ingest_all.as_completed')
-    @patch('utils.get_existing_dataset_ids')
+    @patch('src.pipeline.ingest_all.ThreadPoolExecutor')
+    @patch('src.pipeline.ingest_all.as_completed')
+    @patch('src.pipeline.utils.get_existing_dataset_ids')
     @patch('pandas.read_parquet')
     def test_limit_env_var_is_applied(
         self, mock_read_parquet, mock_get_existing, mock_as_completed, mock_executor
@@ -57,9 +57,9 @@ class TestLimitHandling:
         # Cleanup
         del os.environ['LIMIT']
 
-    @patch('ingest_all.ThreadPoolExecutor')
-    @patch('ingest_all.as_completed')
-    @patch('utils.get_existing_dataset_ids')
+    @patch('src.pipeline.ingest_all.ThreadPoolExecutor')
+    @patch('src.pipeline.ingest_all.as_completed')
+    @patch('src.pipeline.utils.get_existing_dataset_ids')
     @patch('pandas.read_parquet')
     def test_no_limit_processes_all_available(
         self, mock_read_parquet, mock_get_existing, mock_as_completed, mock_executor
@@ -101,9 +101,9 @@ class TestLimitHandling:
 class TestInvisibleFiltering:
     """Test INVISIBLE dataset filtering."""
 
-    @patch('ingest_all.ThreadPoolExecutor')
-    @patch('ingest_all.as_completed')
-    @patch('utils.get_existing_dataset_ids')
+    @patch('src.pipeline.ingest_all.ThreadPoolExecutor')
+    @patch('src.pipeline.ingest_all.as_completed')
+    @patch('src.pipeline.utils.get_existing_dataset_ids')
     @patch('pandas.read_parquet')
     def test_invisible_datasets_are_filtered(
         self, mock_read_parquet, mock_get_existing, mock_as_completed, mock_executor
@@ -147,9 +147,9 @@ class TestInvisibleFiltering:
 class TestExistingDatasetsFiltering:
     """Test that existing datasets in S3 are skipped."""
 
-    @patch('ingest_all.ThreadPoolExecutor')
-    @patch('ingest_all.as_completed')
-    @patch('utils.get_existing_dataset_ids')
+    @patch('src.pipeline.ingest_all.ThreadPoolExecutor')
+    @patch('src.pipeline.ingest_all.as_completed')
+    @patch('src.pipeline.utils.get_existing_dataset_ids')
     @patch('pandas.read_parquet')
     def test_existing_datasets_are_skipped(
         self, mock_read_parquet, mock_get_existing, mock_as_completed, mock_executor
@@ -190,7 +190,7 @@ class TestExistingDatasetsFiltering:
 class TestProcessDataset:
     """Test dataset processing worker function."""
 
-    @patch('ingest_all.download_table')
+    @patch('src.pipeline.ingest_all.download_table')
     def test_successful_download_updates_shared_state(self, mock_download):
         """Test that successful downloads update the shared state."""
         import threading
@@ -209,7 +209,7 @@ class TestProcessDataset:
         assert shared_state['ingested'][0]['title'] == 'Test Dataset'
         assert shared_state['ingested'][0]['size_mb'] == 15.5
 
-    @patch('ingest_all.download_table')
+    @patch('src.pipeline.ingest_all.download_table')
     def test_skipped_download_returns_none(self, mock_download):
         """Test that skipped files don't update shared state."""
         import threading
@@ -225,7 +225,7 @@ class TestProcessDataset:
         assert shared_state['total_size_mb'] == 0
         assert len(shared_state['ingested']) == 0
 
-    @patch('ingest_all.download_table')
+    @patch('src.pipeline.ingest_all.download_table')
     def test_error_handling_returns_none(self, mock_download):
         """Test that errors are caught and return None."""
         import threading
@@ -246,9 +246,9 @@ class TestMainManifest:
     """Test manifest file generation."""
 
     @patch('pandas.DataFrame.to_csv')
-    @patch('ingest_all.ThreadPoolExecutor')
-    @patch('ingest_all.as_completed')
-    @patch('utils.get_existing_dataset_ids')
+    @patch('src.pipeline.ingest_all.ThreadPoolExecutor')
+    @patch('src.pipeline.ingest_all.as_completed')
+    @patch('src.pipeline.utils.get_existing_dataset_ids')
     @patch('pandas.read_parquet')
     def test_manifest_saved_after_ingestion(
         self, mock_read_parquet, mock_get_existing, mock_as_completed, mock_executor, mock_to_csv

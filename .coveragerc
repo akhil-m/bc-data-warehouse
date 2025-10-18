@@ -1,12 +1,12 @@
 [run]
-source = .
+source = src
 omit =
     tests/*
     .venv/*
     venv/*
     */site-packages/*
-    discover.py
-    athena_mcp_server.py
+    src/pipeline/discover.py
+    src/mcp/athena_mcp_server.py
 
 [report]
 exclude_lines =

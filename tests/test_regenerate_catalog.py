@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch, mock_open
 import pandas as pd
-import regenerate_catalog
+from src.pipeline import regenerate_catalog
 
 
 class TestEnhanceCatalog:
@@ -95,7 +95,7 @@ class TestMainIntegration:
     """Test main() orchestration with mocked I/O."""
 
     @patch('boto3.client')
-    @patch('utils.get_existing_dataset_ids')
+    @patch('src.pipeline.utils.get_existing_dataset_ids')
     @patch('pandas.read_parquet')
     def test_main_orchestration(self, mock_read_parquet, mock_get_existing, mock_boto_client):
         """Test that main() calls all functions in correct order."""

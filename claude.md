@@ -14,9 +14,9 @@ At its best it is ruthlessly efficient but also elegant, even beautiful.
 ### Phase 1: Discover ✓
 **Script: `discover.py`**
 - Call `getAllCubesList` API → save to `catalog.parquet`
-- Capture metadata: subject, frequency, dimensions, release time
-- Score datasets by interestingness (frequency, recency, dimensions)
-- Output: 7985 datasets ranked by score
+- Capture metadata: productId, title, subject, frequency, releaseTime, dimensions, nbDatapoints, score
+- Output: 7985 datasets
+- Upload to S3: `s3://build-cananda-dw/statscan/catalog/catalog.parquet`
 
 ### Phase 2: Ingest ✓
 **Script: `ingest_all.py`**
@@ -26,21 +26,25 @@ At its best it is ruthlessly efficient but also elegant, even beautiful.
 - Convert to parquet (pandas)
 - Store in `data/{productId}-{descriptive-title}/{productId}.parquet`
 - Sequential processing (1 worker) to prevent memory exhaustion with large files
-- 10GB target, 5GB per-file limit
-- Upload to S3
+- 10GB target, 5GB per-file limit (600s download timeout)
+- Upload to S3 via `upload_to_s3.sh`
+- **Ingestion modes:**
+  - Manual: Run `python ingest_all.py` with optional `LIMIT` env var
+  - Automated: GitHub Actions workflow `statscan-ingest.yml` (manual trigger with LIMIT input)
 
 ### Phase 3: Warehouse ✓
 - S3: `s3://build-cananda-dw/statscan/data/` (268 datasets uploaded)
 - Glue Crawler: configured with 269 separate S3 targets (268 datasets + catalog)
   - **Critical:** Crawler must have individual S3 targets to avoid merging tables with >70% schema similarity
   - Use `update_crawler.py` to update crawler with new dataset folders from `dataset_folders.txt`
-- Catalog: `s3://build-cananda-dw/statscan/catalog/catalog_enhanced.parquet`
-  - Columns: productId, title, frequency_label, releaseTime, available
+- Catalog: `s3://build-cananda-dw/statscan/catalog/catalog.parquet`
+  - **Single unified catalog** (no base/enhanced split)
+  - Columns: productId, title, subject, frequency, releaseTime, dimensions, nbDatapoints, score, available
+  - `available` flag updated by `regenerate_catalog.py` based on S3 contents
   - Queryable in Athena for dataset discovery
 - Athena: queryable with Presto SQL
   - Database: `statscan`, Region: `us-east-2`
   - Table names contain special chars, require double quotes: `SELECT * FROM "table_name"`
-- Upload script: `upload_to_s3.sh` - syncs `data/` folder to S3 (excludes CSV/ZIP files)
 
 ### Phase 4: Chat ✓
 **Solution: LibreChat + FastMCP**
@@ -58,24 +62,50 @@ At its best it is ruthlessly efficient but also elegant, even beautiful.
   - Config version 1.3.0 required for MCP support
 
 **ECS Deployment (decommissioned):**
-- Was running on ECS Fargate - being shut down to reduce costs
+- Was running on ECS Fargate - shut down to reduce costs
 - Replaced by Coolify deployment
 
 **Files:**
 - `athena_mcp_server.py`: FastMCP server with `query()` tool (port 8001)
 - `Dockerfile.fastmcp`: Container for FastMCP server
 - `librechat.yaml`: MCP server configuration (mounted into LibreChat)
-- `librechat-task-definition-updated.json`: ECS task definition (3 containers: librechat, fastmcp, cloudflared)
+- `docker-compose.yml`: Local development setup (no hardcoded credentials)
 
-### Phase 5: Scale Up ✓
+### Phase 5: Quality & Testing ✓
+**Architecture: Functional Core / Imperative Shell**
+- Refactored all scripts to separate pure functions (testable) from I/O operations
+- Pure functions: 100% test coverage
+- I/O layer: integration tested with mocks
+
+**Test Infrastructure:**
+- pytest + pytest-cov + pytest-mock
+- 65 tests, 69% coverage overall
+- Coverage threshold: 69% (CI fails below this)
+- Files: `tests/test_*.py` for all modules
+
+**CI/CD:**
+- **Local validation:** Pre-push hook (`.git/hooks/pre-push` symlinked from `hooks/pre-push`)
+  - Runs tests before every push (1-2 seconds)
+  - Prevents pushing broken code
+  - Bypass with `git push --no-verify`
+- **GitHub Actions:**
+  - `test.yml`: Run tests on PRs
+  - `statscan-ingest.yml`: Manual workflow for ingestion with optional LIMIT
+
+**Refactored Modules:**
+- `ingest_all.py`: Pure functions (sanitize_column_names, create_folder_name, should_download, filter_catalog)
+- `regenerate_catalog.py`: Pure function (enhance_catalog) - simplified to only update `available` flags
+- `update_crawler.py`: Pure functions (parse_folder_list, create_s3_targets, create_crawler_update_params)
+- `utils.py`: Pure function (extract_product_id_from_folder)
+
 **Data Quality Findings:**
 - StatsCan API provides normalized columnar data (not formatted reports)
 - All parquet files have consistent schema: REF_DATE, GEO, UOM, SCALAR_FACTOR, VALUE + dataset-specific dimensions
 - Schema overlap 70-79% across datasets (why Glue crawler initially merged them)
 
 **Current Status:**
-- 268 datasets ingested locally (268/7985 = 3.4% of catalog)
-- Focus: immigration-related datasets from `immigration_catalog.parquet` (186 total)
+- 268 datasets ingested (268/7985 = 3.4% of catalog)
+- Using full catalog (switched from immigration subset)
 - All datasets stored in `data/{productId}-{title}/` folders
 - Uploaded to S3 and cataloged in Glue Athena
 
@@ -107,8 +137,8 @@ At its best it is ruthlessly efficient but also elegant, even beautiful.
 You are a Canadian economic data analyst. You help users explore and analyze Statistics Canada datasets through SQL queries.
 
 Dataset Discovery:
-- Query the `catalog_enhanced` table first to discover available datasets
-- Columns: productId, title, frequency_label, releaseTime, available
+- Query the `catalog` table first to discover available datasets
+- Columns: productId, title, subject, frequency, releaseTime, dimensions, nbDatapoints, score, available
 - Filter by `available = true` to see which datasets are in the warehouse
 - Search titles for keywords related to user's question
 
@@ -132,7 +162,7 @@ Query guidelines:
 - Remember to account for SCALAR_FACTOR when interpreting values
 
 When users ask questions:
-1. Search catalog_enhanced table to identify relevant datasets
+1. Search catalog table to identify relevant datasets
 2. Check if dataset is available (available = true)
 3. Query the relevant tables with appropriate filters
 4. Explain results in context

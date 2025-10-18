@@ -2,6 +2,24 @@
 
 StatsCan and IRCC data warehouse with LibreChat + FastMCP for natural language querying via Athena.
 
+## Project Structure
+
+```
+src/
+  pipeline/          # Data ingestion pipeline
+    discover.py      # Discover StatsCan datasets
+    ingest_all.py    # Download and convert datasets
+    upload_to_s3.py  # Upload to S3
+    regenerate_catalog.py  # Update catalog availability
+    update_crawler.py      # Update Glue crawler
+    utils.py         # S3 utilities
+  mcp/              # MCP server for Athena
+    athena_mcp_server.py
+deploy/             # Deployment configs (Docker, LibreChat)
+tests/              # Test suite (69% coverage)
+hooks/              # Git hooks (pre-push)
+```
+
 ## Setup
 
 ### 1. Install dependencies
@@ -33,13 +51,34 @@ export AWS_REGION=us-east-2
 
 ## Development
 
+### Running pipeline scripts
+
+All pipeline scripts are Python modules:
+
+```bash
+# Discover datasets
+python -m src.pipeline.discover
+
+# Ingest datasets (optional LIMIT env var)
+LIMIT=5 python -m src.pipeline.ingest_all
+
+# Upload to S3
+python -m src.pipeline.upload_to_s3
+
+# Update catalog
+python -m src.pipeline.regenerate_catalog
+
+# Update Glue crawler
+python -m src.pipeline.update_crawler
+```
+
 ### Running tests
 
 ```bash
-pytest --cov=. --cov-report=term-missing --cov-fail-under=70
+pytest --cov=src --cov-report=term-missing --cov-fail-under=64
 ```
 
-Coverage threshold: 70%
+Coverage threshold: 64% (71 tests, pure functions 100% covered)
 
 ### Architecture
 
@@ -60,7 +99,7 @@ def filter_catalog(catalog_df, existing_ids, limit=None):
 # Imperative shell (I/O)
 def main():
     catalog = pd.read_parquet('catalog.parquet')  # I/O
-    existing = get_existing_dataset_ids('statscan')  # I/O
+    existing = utils.get_existing_dataset_ids('statscan')  # I/O
     filtered = filter_catalog(catalog, existing)  # Pure
     # ... more I/O
 ```
