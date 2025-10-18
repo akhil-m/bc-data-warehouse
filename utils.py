@@ -4,6 +4,24 @@
 import boto3
 
 
+# === Functional Core ===
+
+def extract_product_id_from_folder(folder_name):
+    """Extract productId from S3 folder name.
+
+    Args:
+        folder_name: Folder name like '12100163-international-trade'
+
+    Returns:
+        Product ID as integer, or None if invalid format
+    """
+    if '-' in folder_name and folder_name.split('-')[0].isdigit():
+        return int(folder_name.split('-')[0])
+    return None
+
+
+# === I/O Layer ===
+
 def get_existing_dataset_ids(source='statscan'):
     """Return set of productIds already in S3.
 
@@ -25,9 +43,9 @@ def get_existing_dataset_ids(source='statscan'):
         for obj in page.get('CommonPrefixes', []):
             folder = obj['Prefix'].rstrip('/').split('/')[-1]
 
-            # Extract productId (everything before first dash)
-            if '-' in folder and folder.split('-')[0].isdigit():
-                product_id = int(folder.split('-')[0])
+            # Use pure function to extract productId
+            product_id = extract_product_id_from_folder(folder)
+            if product_id is not None:
                 existing.add(product_id)
 
     return existing

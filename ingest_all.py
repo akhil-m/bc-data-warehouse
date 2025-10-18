@@ -18,8 +18,91 @@ MAX_DOWNLOAD_MB = 5000  # Skip CSV files larger than this
 NUM_WORKERS = 1  # Sequential processing to avoid memory exhaustion
 
 
+# === Functional Core (Pure Functions - No I/O) ===
+
+def sanitize_column_names(columns):
+    """Replace spaces, slashes, and hyphens with underscores for parquet compatibility.
+
+    Args:
+        columns: List of column names
+
+    Returns:
+        List of sanitized column names
+    """
+    return [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in columns]
+
+
+def create_folder_name(product_id, title):
+    """Generate clean folder name from productId and title.
+
+    Args:
+        product_id: Dataset product ID (int)
+        title: Dataset title (str)
+
+    Returns:
+        Folder name like '12100163-international-trade'
+    """
+    clean_title = "".join(c if c.isalnum() or c in (' ', '-') else '' for c in title)
+    clean_title = "-".join(clean_title.lower().split())
+    return f"{product_id}-{clean_title}"
+
+
+def should_download(file_size_bytes, max_mb):
+    """Check if file is within download size limit.
+
+    Args:
+        file_size_bytes: File size in bytes
+        max_mb: Maximum allowed size in MB
+
+    Returns:
+        True if file should be downloaded, False otherwise
+    """
+    return file_size_bytes <= max_mb * 1e6
+
+
+def filter_catalog(catalog_df, existing_ids, skip_invisible=True, limit=None):
+    """Apply all filtering logic to catalog: existing datasets, INVISIBLE, and limit.
+
+    This is the core filtering function that consolidates all filtering logic.
+
+    Args:
+        catalog_df: Full catalog DataFrame
+        existing_ids: Set of productIds already in S3
+        skip_invisible: Whether to skip INVISIBLE datasets (default True)
+        limit: Maximum number of datasets to return (None for no limit)
+
+    Returns:
+        Filtered DataFrame of datasets to process
+    """
+    # Remove datasets already in S3
+    filtered = catalog_df[~catalog_df['productId'].isin(existing_ids)]
+
+    # Remove INVISIBLE datasets (massive internal tables)
+    if skip_invisible:
+        filtered = filtered[~filtered['title'].str.contains('INVISIBLE', na=False)]
+
+    # Apply limit
+    if limit:
+        filtered = filtered.head(limit)
+
+    return filtered
+
+
+# === I/O Layer ===
+
 def download_table(product_id, title):
-    """Download CSV and convert to parquet."""
+    """Download CSV from StatsCan API and convert to parquet.
+
+    This function handles all I/O operations: HTTP requests, file downloads,
+    ZIP extraction, CSV parsing, and parquet writing.
+
+    Args:
+        product_id: Dataset product ID
+        title: Dataset title
+
+    Returns:
+        Size of parquet file in MB, or None if skipped
+    """
     url = f"{API_BASE}/getFullTableDownloadCSV/{product_id}/en"
     headers = {'User-Agent': 'Mozilla/5.0'}
 
@@ -39,7 +122,7 @@ def download_table(product_id, title):
     head_resp.raise_for_status()
     total_size = int(head_resp.headers.get('content-length', 0))
 
-    if total_size > MAX_DOWNLOAD_MB * 1e6:
+    if not should_download(total_size, MAX_DOWNLOAD_MB):
         print(f"{display_title} - Skipped (>{MAX_DOWNLOAD_MB}MB, {total_size/1e6:.0f}MB)")
         return None
 
@@ -79,14 +162,13 @@ def download_table(product_id, title):
     # Clean up temp ZIP
     Path(zip_path).unlink()
 
-    # Sanitize column names for parquet/avro compatibility
-    df.columns = [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in df.columns]
+    # Use core function for column sanitization
+    df.columns = sanitize_column_names(df.columns)
+
+    # Use core function for folder name generation
+    folder_name = create_folder_name(product_id, title)
 
     # Save parquet
-    clean_title = "".join(c if c.isalnum() or c in (' ', '-') else '' for c in title)
-    clean_title = "-".join(clean_title.lower().split())
-    folder_name = f"{product_id}-{clean_title}"
-
     out_dir = Path("data") / folder_name
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{product_id}.parquet"
@@ -97,8 +179,13 @@ def download_table(product_id, title):
     return size_mb
 
 
+# === Orchestration ===
+
 def process_dataset(product_id, title, state_lock, shared_state):
-    """Worker function to process a single dataset."""
+    """Worker function to process a single dataset.
+
+    Wraps download_table() with error handling and shared state management.
+    """
     try:
         size_mb = download_table(product_id, title)
         if size_mb is None:  # File was skipped
@@ -123,30 +210,29 @@ def process_dataset(product_id, title, state_lock, shared_state):
 
 
 def main():
-    # Load catalog
+    """Main ingestion orchestration."""
+    # I/O: Load catalog
     catalog = pd.read_parquet('catalog.parquet')
 
-    # Skip datasets already in S3
+    # I/O: Get existing datasets from S3
     existing = utils.get_existing_dataset_ids('statscan')
     print(f"Already have {len(existing)} datasets in S3")
-    catalog = catalog[~catalog['productId'].isin(existing)]
 
-    # Skip INVISIBLE datasets (massive internal tables, do later)
-    invisible_count = catalog['title'].str.contains('INVISIBLE', na=False).sum()
-    catalog = catalog[~catalog['title'].str.contains('INVISIBLE', na=False)]
-    print(f"Skipping {invisible_count} INVISIBLE datasets")
+    # I/O: Read limit from environment
+    limit = int(os.getenv('LIMIT')) if os.getenv('LIMIT') else None
 
-    # Apply limit if set
-    limit = os.getenv('LIMIT')
-    if limit:
-        limit = int(limit)
-        catalog = catalog.head(limit)
-        print(f"Applying limit: {limit} datasets")
+    # Core: Apply all filtering logic in one place
+    catalog_to_process = filter_catalog(
+        catalog,
+        existing_ids=existing,
+        skip_invisible=True,
+        limit=limit
+    )
 
-    print(f"Processing {len(catalog)} datasets with {NUM_WORKERS} workers")
+    print(f"Processing {len(catalog_to_process)} datasets with {NUM_WORKERS} workers")
     print(f"Target: {MAX_TOTAL_GB} GB total\n")
 
-    # Shared state
+    # Shared state for thread pool
     state_lock = threading.Lock()
     shared_state = {
         'total_size_mb': 0,
@@ -157,7 +243,7 @@ def main():
     with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
         futures = {}
 
-        for idx, row in catalog.iterrows():
+        for idx, row in catalog_to_process.iterrows():
             product_id = row['productId']
             title = row['title']
 
