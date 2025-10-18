@@ -123,7 +123,7 @@ def process_dataset(product_id, title, state_lock, shared_state):
 
 def main():
     # Load catalog
-    catalog = pd.read_parquet('immigration_catalog.parquet')
+    catalog = pd.read_parquet('catalog.parquet')
 
     # Skip datasets already in S3
     existing = utils.get_existing_dataset_ids('statscan')

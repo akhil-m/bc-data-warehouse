@@ -27,10 +27,9 @@ jobs:
       - name: Install dependencies
         run: pip install pandas boto3 requests pyarrow
 
-      - name: Download base catalogs
+      - name: Download base catalog
         run: |
-          aws s3 cp s3://build-cananda-dw/statscan/catalog.parquet catalog.parquet
-          aws s3 cp s3://build-cananda-dw/statscan/immigration_catalog.parquet immigration_catalog.parquet
+          aws s3 cp s3://build-cananda-dw/statscan/catalog/catalog.parquet catalog.parquet
 
       - name: Run ingestion
         env:
