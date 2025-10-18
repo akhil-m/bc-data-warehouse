@@ -1,0 +1,27 @@
+#!/bin/bash
+# Pre-push hook: Run tests with coverage before pushing
+
+echo "Running tests before push..."
+
+# Activate virtual environment if it exists
+if [ -d ".venv" ]; then
+    source .venv/bin/activate
+elif [ -d "venv" ]; then
+    source venv/bin/activate
+fi
+
+# Run tests with coverage
+pytest --cov=. --cov-report=term-missing --cov-fail-under=70 -q
+
+# Capture exit code
+TEST_EXIT=$?
+
+if [ $TEST_EXIT -ne 0 ]; then
+    echo ""
+    echo "❌ Tests failed. Push aborted."
+    echo "Fix the tests or use 'git push --no-verify' to bypass this check."
+    exit 1
+fi
+
+echo "✓ Tests passed. Proceeding with push..."
+exit 0
