@@ -5,6 +5,7 @@ import pandas as pd
 import requests
 import zipfile
 import tempfile
+import os
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
@@ -134,6 +135,13 @@ def main():
     invisible_count = catalog['title'].str.contains('INVISIBLE', na=False).sum()
     catalog = catalog[~catalog['title'].str.contains('INVISIBLE', na=False)]
     print(f"Skipping {invisible_count} INVISIBLE datasets")
+
+    # Apply limit if set
+    limit = os.getenv('LIMIT')
+    if limit:
+        limit = int(limit)
+        catalog = catalog.head(limit)
+        print(f"Applying limit: {limit} datasets")
 
     print(f"Processing {len(catalog)} datasets with {NUM_WORKERS} workers")
     print(f"Target: {MAX_TOTAL_GB} GB total\n")
