@@ -1,54 +1,7 @@
 """Tests for Glue crawler update functions."""
 
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch
 from src.pipeline import update_crawler
-
-
-class TestParseFolderList:
-    """Test folder list parsing logic."""
-
-    def test_parses_normal_list(self):
-        content = "folder1\nfolder2\nfolder3"
-        result = update_crawler.parse_folder_list(content)
-        assert result == ['folder1', 'folder2', 'folder3']
-
-    def test_strips_whitespace(self):
-        """Test that leading/trailing whitespace is removed."""
-        content = "  folder1  \n\tfolder2\t\n   folder3   "
-        result = update_crawler.parse_folder_list(content)
-        assert result == ['folder1', 'folder2', 'folder3']
-
-    def test_filters_empty_lines(self):
-        """Test that empty lines are removed."""
-        content = "folder1\n\n\nfolder2\n  \nfolder3"
-        result = update_crawler.parse_folder_list(content)
-        assert result == ['folder1', 'folder2', 'folder3']
-
-    def test_handles_mixed_whitespace_and_empty_lines(self):
-        content = "  folder1  \n\n  \n  folder2\n\t\nfolder3  "
-        result = update_crawler.parse_folder_list(content)
-        assert result == ['folder1', 'folder2', 'folder3']
-
-    def test_empty_content(self):
-        """Test that completely empty content returns empty list."""
-        content = "\n\n  \n  "
-        result = update_crawler.parse_folder_list(content)
-        assert result == []
-
-    def test_single_folder(self):
-        content = "single-folder"
-        result = update_crawler.parse_folder_list(content)
-        assert result == ['single-folder']
-
-    def test_handles_dataset_folder_format(self):
-        """Test with real dataset folder names."""
-        content = "12100163-international-trade\n43100050-immigrant-income\n98100524-languages"
-        result = update_crawler.parse_folder_list(content)
-        assert result == [
-            '12100163-international-trade',
-            '43100050-immigrant-income',
-            '98100524-languages'
-        ]
 
 
 class TestCreateS3Targets:
@@ -163,9 +116,12 @@ class TestMainIntegration:
     """Test main() orchestration with mocked I/O."""
 
     @patch('boto3.client')
-    @patch('builtins.open', new_callable=mock_open, read_data='12100163-trade\n43100050-immigration\n')
-    def test_main_orchestration(self, mock_file, mock_boto_client):
+    @patch('src.pipeline.utils.get_existing_dataset_folders')
+    def test_main_orchestration(self, mock_get_folders, mock_boto_client):
         """Test that main() calls all functions in correct order."""
+        # Mock S3 folder query
+        mock_get_folders.return_value = ['12100163-trade', '43100050-immigration']
+
         # Mock Glue client
         mock_glue = MagicMock()
         mock_boto_client.return_value = mock_glue
@@ -173,8 +129,8 @@ class TestMainIntegration:
         # Run main
         update_crawler.main()
 
-        # Verify file was opened
-        mock_file.assert_called_once_with('dataset_folders.txt')
+        # Verify S3 was queried
+        mock_get_folders.assert_called_once_with('statscan')
 
         # Verify Glue client was created
         mock_boto_client.assert_called_once_with('glue', region_name='us-east-2')

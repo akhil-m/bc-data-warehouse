@@ -49,3 +49,28 @@ def get_existing_dataset_ids(source='statscan'):
                 existing.add(product_id)
 
     return existing
+
+
+def get_existing_dataset_folders(source='statscan'):
+    """Return list of dataset folder names in S3.
+
+    Args:
+        source: Data source name (e.g., 'statscan', 'ircc')
+
+    Returns:
+        List of folder names like ['12100163-international-trade', ...]
+    """
+    s3 = boto3.client('s3', region_name='us-east-2')
+    bucket = 'build-cananda-dw'
+    prefix = f'{source}/data/'
+
+    folders = []
+    paginator = s3.get_paginator('list_objects_v2')
+
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix, Delimiter='/'):
+        # CommonPrefixes contains folder names like 'statscan/data/12100163-title/'
+        for obj in page.get('CommonPrefixes', []):
+            folder = obj['Prefix'].rstrip('/').split('/')[-1]
+            folders.append(folder)
+
+    return folders

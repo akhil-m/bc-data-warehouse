@@ -131,3 +131,104 @@ class TestGetExistingDatasetIds:
 
         assert result == {1, 2, 3}
         assert len(result) == 3
+
+
+class TestGetExistingDatasetFolders:
+    """Test S3 dataset folder listing logic."""
+
+    @patch('boto3.client')
+    def test_returns_folder_names(self, mock_boto_client):
+        """Test that folder names are correctly extracted from S3."""
+        mock_s3 = MagicMock()
+        mock_boto_client.return_value = mock_s3
+
+        mock_paginator = MagicMock()
+        mock_s3.get_paginator.return_value = mock_paginator
+
+        # Mock S3 response with typical folder structure
+        mock_paginator.paginate.return_value = [
+            {
+                'CommonPrefixes': [
+                    {'Prefix': 'statscan/data/12100163-international-trade/'},
+                    {'Prefix': 'statscan/data/43100050-immigrant-income/'},
+                    {'Prefix': 'statscan/data/98100524-languages-used-at-work/'},
+                ]
+            }
+        ]
+
+        result = utils.get_existing_dataset_folders('statscan')
+
+        assert result == [
+            '12100163-international-trade',
+            '43100050-immigrant-income',
+            '98100524-languages-used-at-work'
+        ]
+        assert len(result) == 3
+
+    @patch('boto3.client')
+    def test_includes_all_folders(self, mock_boto_client):
+        """Test that all folders are included, even non-dataset ones like catalog."""
+        mock_s3 = MagicMock()
+        mock_boto_client.return_value = mock_s3
+
+        mock_paginator = MagicMock()
+        mock_s3.get_paginator.return_value = mock_paginator
+
+        mock_paginator.paginate.return_value = [
+            {
+                'CommonPrefixes': [
+                    {'Prefix': 'statscan/data/12100163-international-trade/'},
+                    {'Prefix': 'statscan/data/catalog/'},
+                ]
+            }
+        ]
+
+        result = utils.get_existing_dataset_folders('statscan')
+
+        # Unlike get_existing_dataset_ids, this returns ALL folders
+        assert result == ['12100163-international-trade', 'catalog']
+        assert len(result) == 2
+
+    @patch('boto3.client')
+    def test_handles_empty_s3_bucket(self, mock_boto_client):
+        """Test that empty S3 bucket returns empty list."""
+        mock_s3 = MagicMock()
+        mock_boto_client.return_value = mock_s3
+
+        mock_paginator = MagicMock()
+        mock_s3.get_paginator.return_value = mock_paginator
+
+        mock_paginator.paginate.return_value = [{'CommonPrefixes': []}]
+
+        result = utils.get_existing_dataset_folders('statscan')
+
+        assert result == []
+
+    @patch('boto3.client')
+    def test_handles_pagination(self, mock_boto_client):
+        """Test that pagination is handled correctly."""
+        mock_s3 = MagicMock()
+        mock_boto_client.return_value = mock_s3
+
+        mock_paginator = MagicMock()
+        mock_s3.get_paginator.return_value = mock_paginator
+
+        # Multiple pages
+        mock_paginator.paginate.return_value = [
+            {
+                'CommonPrefixes': [
+                    {'Prefix': 'statscan/data/1-dataset-one/'},
+                    {'Prefix': 'statscan/data/2-dataset-two/'},
+                ]
+            },
+            {
+                'CommonPrefixes': [
+                    {'Prefix': 'statscan/data/3-dataset-three/'},
+                ]
+            }
+        ]
+
+        result = utils.get_existing_dataset_folders('statscan')
+
+        assert result == ['1-dataset-one', '2-dataset-two', '3-dataset-three']
+        assert len(result) == 3

@@ -2,20 +2,10 @@
 """Update Glue crawler with all dataset folders as separate S3 targets."""
 
 import boto3
+from . import utils
 
 
 # === Functional Core (Pure Functions - No I/O) ===
-
-def parse_folder_list(file_content):
-    """Parse folder list from file content.
-
-    Args:
-        file_content: Raw text content with one folder name per line
-
-    Returns:
-        List of folder names (stripped, non-empty lines only)
-    """
-    return [line.strip() for line in file_content.split('\n') if line.strip()]
 
 
 def create_s3_targets(folders, bucket_prefix):
@@ -62,12 +52,8 @@ def main():
     CRAWLER_NAME = "statscan"
     S3_BUCKET = "s3://build-cananda-dw/statscan/data/"
 
-    # I/O: Read folder list from disk
-    with open("dataset_folders.txt") as f:
-        file_content = f.read()
-
-    # Core: Parse folders
-    folders = parse_folder_list(file_content)
+    # I/O: Get folder list from S3
+    folders = utils.get_existing_dataset_folders('statscan')
     print(f"Found {len(folders)} dataset folders")
 
     # Core: Create S3 targets
