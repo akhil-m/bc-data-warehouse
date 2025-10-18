@@ -2,6 +2,8 @@
 """Ingest multiple StatsCan datasets with size constraints."""
 
 import pandas as pd
+import pyarrow.csv as pa_csv
+import pyarrow.parquet as pq
 import requests
 import zipfile
 import tempfile
@@ -88,6 +90,31 @@ def filter_catalog(catalog_df, existing_ids, skip_invisible=True, limit=None):
     return filtered
 
 
+def convert_csv_to_parquet(csv_path, output_path):
+    """Convert CSV to parquet using PyArrow for memory efficiency.
+
+    Uses PyArrow's streaming CSV reader to handle large files without
+    loading entire dataset into memory. Column names are sanitized
+    during conversion.
+
+    Args:
+        csv_path: Path to input CSV file (str or Path)
+        output_path: Path to output parquet file (str or Path)
+
+    Returns:
+        None (writes file to disk)
+    """
+    # Read CSV with PyArrow (memory efficient)
+    table = pa_csv.read_csv(str(csv_path))
+
+    # Sanitize column names
+    sanitized_names = sanitize_column_names(table.column_names)
+    table = table.rename_columns(sanitized_names)
+
+    # Write parquet
+    pq.write_table(table, str(output_path))
+
+
 # === I/O Layer ===
 
 def download_table(product_id, title):
@@ -155,24 +182,18 @@ def download_table(product_id, title):
             csv_name = z.namelist()[0]
             csv_path = z.extract(csv_name, tmp_dir)
 
-        # Load CSV from disk
+        # Convert CSV to parquet (memory efficient with PyArrow)
         print(f"{display_title} - Converting to parquet...")
-        df = pd.read_csv(csv_path, low_memory=False)
+
+        folder_name = create_folder_name(product_id, title)
+        out_dir = Path("data") / folder_name
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = out_dir / f"{product_id}.parquet"
+
+        convert_csv_to_parquet(csv_path, out_file)
 
     # Clean up temp ZIP
     Path(zip_path).unlink()
-
-    # Use core function for column sanitization
-    df.columns = sanitize_column_names(df.columns)
-
-    # Use core function for folder name generation
-    folder_name = create_folder_name(product_id, title)
-
-    # Save parquet
-    out_dir = Path("data") / folder_name
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / f"{product_id}.parquet"
-    df.to_parquet(out_file, index=False)
 
     size_mb = out_file.stat().st_size / 1e6
     print(f"{display_title} - Complete ({size_mb:.1f}MB)")

@@ -1,7 +1,10 @@
 """Tests for ingestion logic."""
 
 import os
+import tempfile
+from pathlib import Path
 import pandas as pd
+import pyarrow.parquet as pq
 from unittest.mock import patch, MagicMock
 from src.pipeline import ingest_all
 
@@ -280,3 +283,68 @@ class TestMainManifest:
 
         # Cleanup
         del os.environ['LIMIT']
+
+
+class TestConvertCsvToParquet:
+    """Test CSV to parquet conversion with PyArrow."""
+
+    def test_converts_csv_to_parquet(self):
+        """Test basic CSV to parquet conversion."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Create test CSV
+            csv_path = Path(tmp_dir) / 'test.csv'
+            test_data = pd.DataFrame({
+                'REF_DATE': ['2024-01', '2024-02'],
+                'GEO': ['Canada', 'Ontario'],
+                'VALUE': [100, 200]
+            })
+            test_data.to_csv(csv_path, index=False)
+
+            # Convert to parquet
+            parquet_path = Path(tmp_dir) / 'test.parquet'
+            ingest_all.convert_csv_to_parquet(csv_path, parquet_path)
+
+            # Verify output file exists
+            assert parquet_path.exists()
+
+            # Verify data integrity
+            result = pq.read_table(parquet_path).to_pandas()
+            pd.testing.assert_frame_equal(result, test_data)
+
+    def test_sanitizes_column_names(self):
+        """Test that column names with spaces/slashes/hyphens are sanitized."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Create CSV with problematic column names
+            csv_path = Path(tmp_dir) / 'test.csv'
+            test_data = pd.DataFrame({
+                'Column Name': [1, 2],
+                'Another/Column': [3, 4],
+                'With-Hyphen': [5, 6]
+            })
+            test_data.to_csv(csv_path, index=False)
+
+            # Convert to parquet
+            parquet_path = Path(tmp_dir) / 'test.parquet'
+            ingest_all.convert_csv_to_parquet(csv_path, parquet_path)
+
+            # Verify column names are sanitized
+            result = pq.read_table(parquet_path)
+            expected_columns = ['Column_Name', 'Another_Column', 'With_Hyphen']
+            assert result.column_names == expected_columns
+
+    def test_handles_large_columns(self):
+        """Test conversion with many columns (StatsCan datasets can have 50+ dimensions)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Create CSV with many columns
+            csv_path = Path(tmp_dir) / 'test.csv'
+            columns = [f'col_{i}' for i in range(50)]
+            test_data = pd.DataFrame([[i] * 50 for i in range(10)], columns=columns)
+            test_data.to_csv(csv_path, index=False)
+
+            # Convert to parquet
+            parquet_path = Path(tmp_dir) / 'test.parquet'
+            ingest_all.convert_csv_to_parquet(csv_path, parquet_path)
+
+            # Verify all columns present
+            result = pq.read_table(parquet_path)
+            assert len(result.column_names) == 50
