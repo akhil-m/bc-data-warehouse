@@ -81,6 +81,30 @@ class TestShouldDownload:
         assert ingest_all.should_download(10 * 1e9, 5000) is False
 
 
+class TestShouldProcessCsv:
+    """Test uncompressed CSV size limit checking."""
+
+    def test_allows_csv_under_limit(self):
+        # 100MB CSV, 200MB limit
+        assert ingest_all.should_process_csv(100 * 1e6, 200) is True
+
+    def test_allows_csv_at_exact_limit(self):
+        # 200MB CSV, 200MB limit
+        assert ingest_all.should_process_csv(200 * 1e6, 200) is True
+
+    def test_rejects_csv_over_limit(self):
+        # 300MB CSV, 200MB limit
+        assert ingest_all.should_process_csv(300 * 1e6, 200) is False
+
+    def test_allows_small_csv(self):
+        # 10MB CSV, 200MB limit
+        assert ingest_all.should_process_csv(10 * 1e6, 200) is True
+
+    def test_rejects_huge_csv(self):
+        # 3GB CSV, 200MB limit (like the problematic 14100426 dataset)
+        assert ingest_all.should_process_csv(3 * 1e9, 200) is False
+
+
 class TestFilterCatalog:
     """Test catalog filtering logic (the critical function)."""
 

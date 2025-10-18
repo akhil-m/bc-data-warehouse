@@ -16,7 +16,8 @@ from . import utils
 
 API_BASE = "https://www150.statcan.gc.ca/t1/wds/rest"
 MAX_TOTAL_GB = 10  # Just immigration data
-MAX_DOWNLOAD_MB = 5000  # Skip CSV files larger than this
+MAX_DOWNLOAD_MB = 5000  # Skip ZIP files larger than this
+MAX_UNCOMPRESSED_MB = 200  # Skip uncompressed CSVs larger than this (GitHub Actions constraint)
 NUM_WORKERS = 1  # Sequential processing to avoid memory exhaustion
 
 
@@ -60,6 +61,19 @@ def should_download(file_size_bytes, max_mb):
         True if file should be downloaded, False otherwise
     """
     return file_size_bytes <= max_mb * 1e6
+
+
+def should_process_csv(uncompressed_size_bytes, max_mb):
+    """Check if uncompressed CSV is within size limit.
+
+    Args:
+        uncompressed_size_bytes: Uncompressed CSV size in bytes
+        max_mb: Maximum allowed size in MB
+
+    Returns:
+        True if CSV should be processed, False otherwise
+    """
+    return uncompressed_size_bytes <= max_mb * 1e6
 
 
 def filter_catalog(catalog_df, existing_ids, skip_invisible=True, limit=None):
@@ -175,6 +189,16 @@ def download_table(product_id, title):
         zip_path = tmp_zip.name
 
     print(f"{display_title} - Downloaded, extracting...")
+
+    # Check uncompressed size before extraction
+    with zipfile.ZipFile(zip_path) as z:
+        csv_info = z.infolist()[0]
+        uncompressed_mb = csv_info.file_size / 1e6
+
+        if not should_process_csv(csv_info.file_size, MAX_UNCOMPRESSED_MB):
+            print(f"{display_title} - Skipped (CSV too large: {uncompressed_mb:.0f}MB uncompressed)")
+            Path(zip_path).unlink()
+            return None
 
     # Extract CSV to temp directory
     with tempfile.TemporaryDirectory() as tmp_dir:
