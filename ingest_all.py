@@ -135,9 +135,6 @@ def main():
     catalog = catalog[~catalog['title'].str.contains('INVISIBLE', na=False)]
     print(f"Skipping {invisible_count} INVISIBLE datasets")
 
-    # Sort by interestingness score (descending)
-    catalog = catalog.sort_values('score', ascending=False)
-
     print(f"Processing {len(catalog)} datasets with {NUM_WORKERS} workers")
     print(f"Target: {MAX_TOTAL_GB} GB total\n")
 
