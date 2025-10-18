@@ -5,33 +5,6 @@ import pandas as pd
 import regenerate_catalog
 
 
-class TestDecodeFrequency:
-    """Test frequency code decoding logic."""
-
-    def test_decodes_known_frequencies(self):
-        assert regenerate_catalog.decode_frequency(1) == 'Occasional'
-        assert regenerate_catalog.decode_frequency(6) == 'Monthly'
-        assert regenerate_catalog.decode_frequency(9) == 'Quarterly'
-        assert regenerate_catalog.decode_frequency(12) == 'Annual'
-        assert regenerate_catalog.decode_frequency(18) == 'Census'
-
-    def test_decodes_all_frequency_codes(self):
-        """Test all defined frequency codes."""
-        expected = {
-            1: 'Occasional', 2: 'Biannual', 6: 'Monthly', 9: 'Quarterly',
-            11: 'Bimonthly', 12: 'Annual', 13: 'Biennial', 14: 'Triennial',
-            15: 'Quinquennial', 16: 'Decennial', 17: 'Every 3 years',
-            18: 'Census', 19: 'Every 4 years', 20: 'Every 6 years'
-        }
-        for code, label in expected.items():
-            assert regenerate_catalog.decode_frequency(code) == label
-
-    def test_returns_unknown_for_invalid_code(self):
-        assert regenerate_catalog.decode_frequency(999) == 'Unknown'
-        assert regenerate_catalog.decode_frequency(0) == 'Unknown'
-        assert regenerate_catalog.decode_frequency(-1) == 'Unknown'
-
-
 class TestEnhanceCatalog:
     """Test catalog enhancement logic."""
 
@@ -40,8 +13,9 @@ class TestEnhanceCatalog:
         catalog = pd.DataFrame({
             'productId': [1, 2, 3, 4, 5],
             'title': ['Dataset A', 'Dataset B', 'Dataset C', 'Dataset D', 'Dataset E'],
-            'frequency': [6, 12, 1, 9, 6],
-            'releaseTime': ['2024-01-01'] * 5
+            'frequency_label': ['Monthly', 'Annual', 'Quarterly', 'Monthly', 'Annual'],
+            'releaseTime': ['2024-01-01'] * 5,
+            'available': [False] * 5
         })
         existing = {1, 3, 5}
 
@@ -49,42 +23,34 @@ class TestEnhanceCatalog:
 
         assert result['available'].tolist() == [True, False, True, False, True]
 
-    def test_decodes_frequency_labels(self):
-        """Test that frequency codes are decoded to labels."""
+    def test_preserves_all_columns(self):
+        """Test that all columns are preserved."""
         catalog = pd.DataFrame({
-            'productId': [1, 2, 3],
-            'title': ['A', 'B', 'C'],
-            'frequency': [6, 12, 999],  # Monthly, Annual, Unknown
-            'releaseTime': ['2024-01-01'] * 3
+            'productId': [1, 2],
+            'title': ['A', 'B'],
+            'subject': ['Economics', 'Immigration'],
+            'frequency_label': ['Monthly', 'Annual'],
+            'releaseTime': ['2024-01-01', '2024-02-01'],
+            'dimensions': [5, 3],
+            'nbDatapoints': [1000, 2000],
+            'score': [0.8, 0.9],
+            'available': [False, False]
         })
 
-        result = regenerate_catalog.enhance_catalog(catalog, set())
+        result = regenerate_catalog.enhance_catalog(catalog, {1})
 
-        assert result['frequency_label'].tolist() == ['Monthly', 'Annual', 'Unknown']
-
-    def test_selects_correct_columns(self):
-        """Test that only required columns are kept."""
-        catalog = pd.DataFrame({
-            'productId': [1],
-            'title': ['Dataset'],
-            'frequency': [6],
-            'releaseTime': ['2024-01-01'],
-            'extra_column': ['should be dropped'],
-            'another_extra': [123]
-        })
-
-        result = regenerate_catalog.enhance_catalog(catalog, set())
-
-        expected_columns = ['productId', 'title', 'frequency_label', 'releaseTime', 'available']
-        assert list(result.columns) == expected_columns
+        # All columns preserved
+        assert set(result.columns) == set(catalog.columns)
+        assert len(result.columns) == len(catalog.columns)
 
     def test_no_existing_datasets(self):
         """Test enhancement when no datasets exist in S3."""
         catalog = pd.DataFrame({
             'productId': [1, 2, 3],
             'title': ['A', 'B', 'C'],
-            'frequency': [6, 12, 9],
-            'releaseTime': ['2024-01-01'] * 3
+            'frequency_label': ['Monthly', 'Annual', 'Quarterly'],
+            'releaseTime': ['2024-01-01'] * 3,
+            'available': [False] * 3
         })
 
         result = regenerate_catalog.enhance_catalog(catalog, set())
@@ -97,8 +63,9 @@ class TestEnhanceCatalog:
         catalog = pd.DataFrame({
             'productId': [1, 2, 3],
             'title': ['A', 'B', 'C'],
-            'frequency': [6, 12, 9],
-            'releaseTime': ['2024-01-01'] * 3
+            'frequency_label': ['Monthly', 'Annual', 'Quarterly'],
+            'releaseTime': ['2024-01-01'] * 3,
+            'available': [False] * 3
         })
         existing = {1, 2, 3}
 
@@ -112,17 +79,16 @@ class TestEnhanceCatalog:
         catalog = pd.DataFrame({
             'productId': [1, 2],
             'title': ['A', 'B'],
-            'frequency': [6, 12],
-            'releaseTime': ['2024-01-01', '2024-02-01']
+            'frequency_label': ['Monthly', 'Annual'],
+            'releaseTime': ['2024-01-01', '2024-02-01'],
+            'available': [False] * 2
         })
-        original_columns = list(catalog.columns)
+        original_data = catalog.copy()
 
         regenerate_catalog.enhance_catalog(catalog, {1})
 
-        # Original should be unchanged
-        assert list(catalog.columns) == original_columns
-        assert 'available' not in catalog.columns
-        assert 'frequency_label' not in catalog.columns
+        # Original should be unchanged (except available column which we're testing)
+        pd.testing.assert_frame_equal(catalog, original_data)
 
 
 class TestMainIntegration:
@@ -133,12 +99,13 @@ class TestMainIntegration:
     @patch('pandas.read_parquet')
     def test_main_orchestration(self, mock_read_parquet, mock_get_existing, mock_boto_client):
         """Test that main() calls all functions in correct order."""
-        # Mock catalog data
+        # Mock catalog data (already has frequency_label and available columns)
         catalog_df = pd.DataFrame({
             'productId': [1, 2, 3],
             'title': ['A', 'B', 'C'],
-            'frequency': [6, 12, 9],
-            'releaseTime': ['2024-01-01'] * 3
+            'frequency_label': ['Monthly', 'Annual', 'Quarterly'],
+            'releaseTime': ['2024-01-01'] * 3,
+            'available': [False] * 3
         })
         mock_read_parquet.return_value = catalog_df
         mock_get_existing.return_value = {1, 3}
@@ -158,7 +125,7 @@ class TestMainIntegration:
 
         # Verify S3 upload was called
         mock_s3.upload_file.assert_called_once_with(
-            'catalog_enhanced.parquet',
+            'catalog.parquet',
             'build-cananda-dw',
-            'statscan/data/catalog/catalog_enhanced.parquet'
+            'statscan/catalog/catalog.parquet'
         )

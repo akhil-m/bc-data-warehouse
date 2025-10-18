@@ -127,7 +127,7 @@ def download_table(product_id, title):
         return None
 
     # Stream ZIP to temp file on disk
-    zip_resp = requests.get(zip_url, headers=headers, timeout=120, stream=True)
+    zip_resp = requests.get(zip_url, headers=headers, timeout=600, stream=True)
     zip_resp.raise_for_status()
 
     downloaded = 0

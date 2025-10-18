@@ -240,3 +240,43 @@ class TestProcessDataset:
         assert result is None
         assert shared_state['total_size_mb'] == 0
         assert len(shared_state['ingested']) == 0
+
+
+class TestMainManifest:
+    """Test manifest file generation."""
+
+    @patch('pandas.DataFrame.to_csv')
+    @patch('ingest_all.ThreadPoolExecutor')
+    @patch('ingest_all.as_completed')
+    @patch('utils.get_existing_dataset_ids')
+    @patch('pandas.read_parquet')
+    def test_manifest_saved_after_ingestion(
+        self, mock_read_parquet, mock_get_existing, mock_as_completed, mock_executor, mock_to_csv
+    ):
+        """Test that manifest CSV is saved after ingestion."""
+        mock_catalog = pd.DataFrame({
+            'productId': [1],
+            'title': ['Dataset 1']
+        })
+        mock_read_parquet.return_value = mock_catalog
+        mock_get_existing.return_value = set()
+
+        # Mock executor
+        mock_executor_instance = MagicMock()
+        mock_executor_instance.submit = MagicMock()
+        mock_executor.return_value.__enter__.return_value = mock_executor_instance
+        mock_as_completed.return_value = []
+
+        # Set LIMIT
+        os.environ['LIMIT'] = '1'
+
+        try:
+            ingest_all.main()
+        except SystemExit:
+            pass
+
+        # Verify manifest was saved
+        mock_to_csv.assert_called_once_with('ingested.csv', index=False)
+
+        # Cleanup
+        del os.environ['LIMIT']
