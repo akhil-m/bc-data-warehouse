@@ -16,8 +16,8 @@ from . import utils
 
 API_BASE = "https://www150.statcan.gc.ca/t1/wds/rest"
 MAX_TOTAL_GB = 10  # Just immigration data
-MAX_DOWNLOAD_MB = 5000  # Skip ZIP files larger than this
-MAX_UNCOMPRESSED_MB = 200  # Skip uncompressed CSVs larger than this (GitHub Actions constraint)
+MAX_DOWNLOAD_MB = 100  # Skip ZIP files larger than this (heuristic to save bandwidth)
+MAX_UNCOMPRESSED_MB = 200  # Skip uncompressed CSVs larger than this (accurate check after download)
 NUM_WORKERS = 1  # Sequential processing to avoid memory exhaustion
 
 
