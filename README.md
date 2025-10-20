@@ -114,17 +114,39 @@ git push --no-verify
 
 ## Docker Deployment
 
-### Run full pipeline
+### Quick start (recommended)
 
-The entire pipeline runs in Docker with orchestrated steps:
+Use the helper script to rebuild and run the pipeline:
 
 ```bash
 # Test with limited datasets
-LIMIT=5 docker compose -f docker/docker-compose.yml up
+./run-docker.sh 5
 
 # Production run (all datasets)
+./run-docker.sh
+
+# Help
+./run-docker.sh --help
+```
+
+The script automatically rebuilds the Docker image and runs the full pipeline.
+
+### Manual Docker commands
+
+If you need more control, use docker compose directly:
+
+```bash
+# Rebuild image
+docker compose -f docker/docker-compose.yml build
+
+# Run pipeline with limit
+LIMIT=5 docker compose -f docker/docker-compose.yml up
+
+# Run pipeline (all datasets)
 docker compose -f docker/docker-compose.yml up
 ```
+
+### Pipeline steps
 
 The pipeline executes in sequence:
 1. `discover` - Fetch catalog from StatsCan API
