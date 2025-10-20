@@ -87,7 +87,8 @@ def generate_conversion_script(csv_path, output_path):
     preventing OOM kills on large files (150MB+).
 
     ALL COLUMNS FORCED TO STRING TYPE:
-    - Handles mixed types in same column (e.g., '4680, 4690' in integer column)
+    - Disables PyArrow type inference via column_types parameter
+    - Handles mixed types in same column (e.g., '4680, 4690', '1011-C')
     - Preserves raw data exactly as-is (no type coercion)
     - Standard data lake pattern (type casting happens at query time in Athena)
 
@@ -102,10 +103,26 @@ def generate_conversion_script(csv_path, output_path):
         String containing Python script to execute in subprocess
     """
     return f"""
+import pandas as pd
 import pyarrow as pa
 import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
-import pyarrow.compute as pc
+
+# Get column names from CSV header (lightweight, doesn't load data)
+df_header = pd.read_csv('{csv_path}', nrows=0)
+original_columns = df_header.columns.tolist()
+
+# Sanitize column names for parquet compatibility
+sanitized_columns = [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in original_columns]
+
+# Create schema with all string types
+string_schema = pa.schema([
+    pa.field(name, pa.string())
+    for name in sanitized_columns
+])
+
+# Force all columns to string type (prevents type inference errors)
+column_types = {{col: pa.string() for col in original_columns}}
 
 # Configure CSV parsing for StatsCan standard table symbols
 # Official list: https://www.statcan.gc.ca/en/concepts/definitions/guide-symbol
@@ -121,41 +138,20 @@ convert_options = pa_csv.ConvertOptions(
         'p', 'r',        # Preliminary/revised
         '0s'             # Rounded to zero
     ],
-    strings_can_be_null=True
+    strings_can_be_null=True,
+    column_types=column_types  # Force all columns to string!
 )
 
-# Open CSV for streaming (processes in batches of ~64K rows)
+# Stream CSV to parquet
 with pa_csv.open_csv('{csv_path}', convert_options=convert_options) as reader:
-    writer = None
-    sanitized = None
-    string_schema = None
-
-    for batch in reader:
-        if writer is None:
-            # Sanitize column names on first batch (same logic as sanitize_column_names())
-            columns = batch.schema.names
-            sanitized = [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in columns]
-
-            # Create schema with ALL columns as string type
-            # This handles mixed types (integers, ranges, lists) in same column
-            string_schema = pa.schema([
-                pa.field(sanitized[i], pa.string())
-                for i in range(len(batch.schema))
-            ])
-
-            # Initialize parquet writer
-            writer = pq.ParquetWriter('{output_path}', string_schema)
-
-        # Cast all columns to string, rename, and write batch
-        string_batch = pa.RecordBatch.from_arrays(
-            [pc.cast(batch.column(i), pa.string()) for i in range(batch.num_columns)],
-            schema=string_schema
-        )
-        writer.write_batch(string_batch)
-
-    # Close writer if any data was processed
-    if writer:
-        writer.close()
+    with pq.ParquetWriter('{output_path}', string_schema) as writer:
+        for batch in reader:
+            # Rename columns to sanitized versions
+            renamed_batch = pa.RecordBatch.from_arrays(
+                [batch.column(i) for i in range(batch.num_columns)],
+                schema=string_schema
+            )
+            writer.write_batch(renamed_batch)
 """
 
 

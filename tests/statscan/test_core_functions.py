@@ -66,9 +66,9 @@ class TestGenerateConversionScript:
         script = ingest.generate_conversion_script('/tmp/input.csv', '/tmp/output.parquet')
 
         # Should contain necessary imports
+        assert 'import pandas as pd' in script
         assert 'import pyarrow.csv as pa_csv' in script
         assert 'import pyarrow.parquet as pq' in script
-        assert 'import pyarrow.compute as pc' in script
 
         # Should contain file paths
         assert '/tmp/input.csv' in script
@@ -79,7 +79,7 @@ class TestGenerateConversionScript:
 
         # Should contain string type forcing logic
         assert 'pa.string()' in script
-        assert 'pc.cast' in script
+        assert 'column_types' in script
         assert 'RecordBatch.from_arrays' in script
 
     def test_handles_different_paths(self):
@@ -96,15 +96,18 @@ class TestGenerateConversionScript:
         """Test that script includes all necessary streaming steps."""
         script = ingest.generate_conversion_script('input.csv', 'output.parquet')
 
+        # Should read header with pandas
+        assert 'pd.read_csv' in script
+        assert 'nrows=0' in script
+
         # Should have all required streaming steps
         assert 'pa_csv.open_csv' in script
-        assert 'batch.schema.names' in script
         assert 'pq.ParquetWriter' in script
         assert 'writer.write_batch' in script
 
-        # Should have string casting steps
+        # Should force string types via column_types
         assert 'pa.string()' in script
-        assert 'pc.cast' in script
+        assert 'column_types' in script
         assert 'RecordBatch.from_arrays' in script
 
     def test_sanitization_matches_sanitize_column_names(self):
@@ -114,7 +117,7 @@ class TestGenerateConversionScript:
         # The sanitization logic should be the same as in sanitize_column_names()
         # This ensures DRY principle - if we change sanitize_column_names(),
         # we should update the subprocess script too
-        expected_logic = "[col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in columns]"
+        expected_logic = "[col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in original_columns]"
         assert expected_logic in script
 
     def test_script_uses_pathlib_path_objects(self):
