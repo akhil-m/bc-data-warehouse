@@ -68,6 +68,7 @@ class TestGenerateConversionScript:
         # Should contain necessary imports
         assert 'import pyarrow.csv as pa_csv' in script
         assert 'import pyarrow.parquet as pq' in script
+        assert 'import pyarrow.compute as pc' in script
 
         # Should contain file paths
         assert '/tmp/input.csv' in script
@@ -75,6 +76,11 @@ class TestGenerateConversionScript:
 
         # Should contain sanitization logic (check the full chain)
         assert ".replace(' ', '_').replace('/', '_').replace('-', '_')" in script
+
+        # Should contain string type forcing logic
+        assert 'pa.string()' in script
+        assert 'pc.cast' in script
+        assert 'RecordBatch.from_arrays' in script
 
     def test_handles_different_paths(self):
         """Test script generation with various path formats."""
@@ -93,9 +99,13 @@ class TestGenerateConversionScript:
         # Should have all required streaming steps
         assert 'pa_csv.open_csv' in script
         assert 'batch.schema.names' in script
-        assert 'batch.rename_columns' in script
         assert 'pq.ParquetWriter' in script
         assert 'writer.write_batch' in script
+
+        # Should have string casting steps
+        assert 'pa.string()' in script
+        assert 'pc.cast' in script
+        assert 'RecordBatch.from_arrays' in script
 
     def test_sanitization_matches_sanitize_column_names(self):
         """Test that embedded sanitization logic matches sanitize_column_names() function."""

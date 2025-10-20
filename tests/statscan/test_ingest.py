@@ -335,9 +335,10 @@ class TestConvertCsvToParquet:
             # Verify output file exists
             assert parquet_path.exists()
 
-            # Verify data integrity
+            # Verify data integrity (all columns are strings now)
             result = pq.read_table(parquet_path).to_pandas()
-            pd.testing.assert_frame_equal(result, test_data)
+            expected = test_data.astype(str)  # All columns converted to string
+            pd.testing.assert_frame_equal(result, expected)
 
     def test_sanitizes_column_names(self):
         """Test that column names with spaces/slashes/hyphens are sanitized."""
@@ -376,3 +377,50 @@ class TestConvertCsvToParquet:
             # Verify all columns present
             result = pq.read_table(parquet_path)
             assert len(result.column_names) == 50
+
+    def test_forces_all_columns_to_string(self):
+        """Test that all columns are forced to string type in parquet."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Create CSV with mixed types
+            csv_path = Path(tmp_dir) / 'test.csv'
+            test_data = pd.DataFrame({
+                'string_col': ['Canada', 'Ontario'],
+                'int_col': [100, 200],
+                'float_col': [1.5, 2.5]
+            })
+            test_data.to_csv(csv_path, index=False)
+
+            # Convert to parquet
+            parquet_path = Path(tmp_dir) / 'test.parquet'
+            ingest.convert_csv_to_parquet(csv_path, parquet_path)
+
+            # Verify ALL columns are string type
+            import pyarrow as pa
+            result = pq.read_table(parquet_path)
+            for field in result.schema:
+                assert field.type == pa.string(), f"Column {field.name} is {field.type}, expected string"
+
+    def test_handles_mixed_types_in_column(self):
+        """Test that columns with mixed types (e.g., '4680, 4690' in integer column) are handled."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Create CSV with mixed types in same column (the bug scenario)
+            # Note: Properly quoted to avoid CSV parsing issues
+            csv_path = Path(tmp_dir) / 'test.csv'
+            with open(csv_path, 'w') as f:
+                f.write('REF_DATE,GEO,VALUE\n')
+                f.write('2024-01,Canada,100\n')
+                f.write('2024-02,Ontario,"4680, 4690"\n')  # Quoted comma-separated list
+                f.write('2024-03,Quebec,200\n')
+
+            # Convert to parquet (should NOT fail)
+            parquet_path = Path(tmp_dir) / 'test.parquet'
+            ingest.convert_csv_to_parquet(csv_path, parquet_path)
+
+            # Verify conversion succeeded
+            assert parquet_path.exists()
+
+            # Verify data integrity - all as strings
+            result = pq.read_table(parquet_path).to_pandas()
+            assert result.loc[0, 'VALUE'] == '100'
+            assert result.loc[1, 'VALUE'] == '4680, 4690'
+            assert result.loc[2, 'VALUE'] == '200'

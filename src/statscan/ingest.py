@@ -86,8 +86,13 @@ def generate_conversion_script(csv_path, output_path):
     The script processes CSV in batches to avoid loading entire file into memory,
     preventing OOM kills on large files (150MB+).
 
-    Handles StatsCan's null conventions: empty strings, '..' (not available),
-    '...' (not applicable), 'x' (suppressed), 'F' (unreliable).
+    ALL COLUMNS FORCED TO STRING TYPE:
+    - Handles mixed types in same column (e.g., '4680, 4690' in integer column)
+    - Preserves raw data exactly as-is (no type coercion)
+    - Standard data lake pattern (type casting happens at query time in Athena)
+
+    Handles StatsCan's standard table symbols (official list):
+    https://www.statcan.gc.ca/en/concepts/definitions/guide-symbol
 
     Args:
         csv_path: Path to input CSV file (str or Path)
@@ -100,10 +105,22 @@ def generate_conversion_script(csv_path, output_path):
 import pyarrow as pa
 import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
+import pyarrow.compute as pc
 
-# Configure CSV parsing for StatsCan null conventions
+# Configure CSV parsing for StatsCan standard table symbols
+# Official list: https://www.statcan.gc.ca/en/concepts/definitions/guide-symbol
 convert_options = pa_csv.ConvertOptions(
-    null_values=['', '..', '...', 'x', 'F'],
+    null_values=[
+        '',              # Empty string
+        '.', '..', '...', # Not available/applicable
+        'x', 'X',        # Suppressed
+        'E', 'e',        # Use with caution
+        'F', 'f',        # Too unreliable
+        't', 'T',        # Terminated
+        'A', 'B', 'C', 'D', # Quality grades
+        'p', 'r',        # Preliminary/revised
+        '0s'             # Rounded to zero
+    ],
     strings_can_be_null=True
 )
 
@@ -111,6 +128,7 @@ convert_options = pa_csv.ConvertOptions(
 with pa_csv.open_csv('{csv_path}', convert_options=convert_options) as reader:
     writer = None
     sanitized = None
+    string_schema = None
 
     for batch in reader:
         if writer is None:
@@ -118,18 +136,22 @@ with pa_csv.open_csv('{csv_path}', convert_options=convert_options) as reader:
             columns = batch.schema.names
             sanitized = [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in columns]
 
-            # Create schema with sanitized names
-            schema = pa.schema([
-                pa.field(sanitized[i], batch.schema.field(i).type)
+            # Create schema with ALL columns as string type
+            # This handles mixed types (integers, ranges, lists) in same column
+            string_schema = pa.schema([
+                pa.field(sanitized[i], pa.string())
                 for i in range(len(batch.schema))
             ])
 
             # Initialize parquet writer
-            writer = pq.ParquetWriter('{output_path}', schema)
+            writer = pq.ParquetWriter('{output_path}', string_schema)
 
-        # Rename columns and write batch
-        batch = batch.rename_columns(sanitized)
-        writer.write_batch(batch)
+        # Cast all columns to string, rename, and write batch
+        string_batch = pa.RecordBatch.from_arrays(
+            [pc.cast(batch.column(i), pa.string()) for i in range(batch.num_columns)],
+            schema=string_schema
+        )
+        writer.write_batch(string_batch)
 
     # Close writer if any data was processed
     if writer:
