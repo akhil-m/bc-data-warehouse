@@ -26,3 +26,13 @@ librechat.env
 # Logs
 *.log
 logs/
+
+# Testing
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# IDE
+.vscode/
+.idea/

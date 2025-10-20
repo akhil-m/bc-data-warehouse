@@ -1,20 +1,21 @@
 """Tests for ingestion logic."""
 
 import os
+import sys
 import tempfile
 from pathlib import Path
 import pandas as pd
 import pyarrow.parquet as pq
 from unittest.mock import patch, MagicMock
-from src.pipeline import ingest_all
+from src.statscan import ingest
 
 
 class TestLimitHandling:
     """Test LIMIT environment variable handling."""
 
-    @patch('src.pipeline.ingest_all.ThreadPoolExecutor')
-    @patch('src.pipeline.ingest_all.as_completed')
-    @patch('src.pipeline.utils.get_existing_dataset_ids')
+    @patch('src.statscan.ingest.ThreadPoolExecutor')
+    @patch('src.statscan.ingest.as_completed')
+    @patch('src.statscan.utils.get_existing_dataset_ids')
     @patch('pandas.read_parquet')
     def test_limit_env_var_is_applied(
         self, mock_read_parquet, mock_get_existing, mock_as_completed, mock_executor
@@ -50,7 +51,7 @@ class TestLimitHandling:
         # Mock pandas to_csv
         with patch('pandas.DataFrame.to_csv'):
             try:
-                ingest_all.main()
+                ingest.main()
             except SystemExit:
                 pass
 
@@ -60,9 +61,9 @@ class TestLimitHandling:
         # Cleanup
         del os.environ['LIMIT']
 
-    @patch('src.pipeline.ingest_all.ThreadPoolExecutor')
-    @patch('src.pipeline.ingest_all.as_completed')
-    @patch('src.pipeline.utils.get_existing_dataset_ids')
+    @patch('src.statscan.ingest.ThreadPoolExecutor')
+    @patch('src.statscan.ingest.as_completed')
+    @patch('src.statscan.utils.get_existing_dataset_ids')
     @patch('pandas.read_parquet')
     def test_no_limit_processes_all_available(
         self, mock_read_parquet, mock_get_existing, mock_as_completed, mock_executor
@@ -93,7 +94,7 @@ class TestLimitHandling:
 
         with patch('pandas.DataFrame.to_csv'):
             try:
-                ingest_all.main()
+                ingest.main()
             except SystemExit:
                 pass
 
@@ -104,9 +105,9 @@ class TestLimitHandling:
 class TestInvisibleFiltering:
     """Test INVISIBLE dataset filtering."""
 
-    @patch('src.pipeline.ingest_all.ThreadPoolExecutor')
-    @patch('src.pipeline.ingest_all.as_completed')
-    @patch('src.pipeline.utils.get_existing_dataset_ids')
+    @patch('src.statscan.ingest.ThreadPoolExecutor')
+    @patch('src.statscan.ingest.as_completed')
+    @patch('src.statscan.utils.get_existing_dataset_ids')
     @patch('pandas.read_parquet')
     def test_invisible_datasets_are_filtered(
         self, mock_read_parquet, mock_get_existing, mock_as_completed, mock_executor
@@ -139,7 +140,7 @@ class TestInvisibleFiltering:
 
         with patch('pandas.DataFrame.to_csv'):
             try:
-                ingest_all.main()
+                ingest.main()
             except SystemExit:
                 pass
 
@@ -150,9 +151,9 @@ class TestInvisibleFiltering:
 class TestExistingDatasetsFiltering:
     """Test that existing datasets in S3 are skipped."""
 
-    @patch('src.pipeline.ingest_all.ThreadPoolExecutor')
-    @patch('src.pipeline.ingest_all.as_completed')
-    @patch('src.pipeline.utils.get_existing_dataset_ids')
+    @patch('src.statscan.ingest.ThreadPoolExecutor')
+    @patch('src.statscan.ingest.as_completed')
+    @patch('src.statscan.utils.get_existing_dataset_ids')
     @patch('pandas.read_parquet')
     def test_existing_datasets_are_skipped(
         self, mock_read_parquet, mock_get_existing, mock_as_completed, mock_executor
@@ -182,7 +183,7 @@ class TestExistingDatasetsFiltering:
 
         with patch('pandas.DataFrame.to_csv'):
             try:
-                ingest_all.main()
+                ingest.main()
             except SystemExit:
                 pass
 
@@ -193,17 +194,18 @@ class TestExistingDatasetsFiltering:
 class TestProcessDataset:
     """Test dataset processing worker function."""
 
-    @patch('src.pipeline.ingest_all.download_table')
+    @patch('src.statscan.ingest.download_table')
     def test_successful_download_updates_shared_state(self, mock_download):
         """Test that successful downloads update the shared state."""
         import threading
 
-        mock_download.return_value = 15.5  # 15.5 MB file
+        # download_table returns (size_mb, file_path)
+        mock_download.return_value = (15.5, 'path/to/file.parquet')
 
         state_lock = threading.Lock()
         shared_state = {'total_size_mb': 0, 'ingested': []}
 
-        result = ingest_all.process_dataset(123, 'Test Dataset', state_lock, shared_state)
+        result = ingest.process_dataset(123, 'Test Dataset', state_lock, shared_state)
 
         assert result == 15.5
         assert shared_state['total_size_mb'] == 15.5
@@ -211,8 +213,9 @@ class TestProcessDataset:
         assert shared_state['ingested'][0]['productId'] == 123
         assert shared_state['ingested'][0]['title'] == 'Test Dataset'
         assert shared_state['ingested'][0]['size_mb'] == 15.5
+        assert shared_state['ingested'][0]['file_path'] == 'path/to/file.parquet'
 
-    @patch('src.pipeline.ingest_all.download_table')
+    @patch('src.statscan.ingest.download_table')
     def test_skipped_download_returns_none(self, mock_download):
         """Test that skipped files don't update shared state."""
         import threading
@@ -222,13 +225,13 @@ class TestProcessDataset:
         state_lock = threading.Lock()
         shared_state = {'total_size_mb': 0, 'ingested': []}
 
-        result = ingest_all.process_dataset(123, 'Test Dataset', state_lock, shared_state)
+        result = ingest.process_dataset(123, 'Test Dataset', state_lock, shared_state)
 
         assert result is None
         assert shared_state['total_size_mb'] == 0
         assert len(shared_state['ingested']) == 0
 
-    @patch('src.pipeline.ingest_all.download_table')
+    @patch('src.statscan.ingest.download_table')
     def test_error_handling_returns_none(self, mock_download):
         """Test that errors are caught and return None."""
         import threading
@@ -238,7 +241,7 @@ class TestProcessDataset:
         state_lock = threading.Lock()
         shared_state = {'total_size_mb': 0, 'ingested': []}
 
-        result = ingest_all.process_dataset(123, 'Test Dataset', state_lock, shared_state)
+        result = ingest.process_dataset(123, 'Test Dataset', state_lock, shared_state)
 
         assert result is None
         assert shared_state['total_size_mb'] == 0
@@ -249,9 +252,9 @@ class TestMainManifest:
     """Test manifest file generation."""
 
     @patch('pandas.DataFrame.to_csv')
-    @patch('src.pipeline.ingest_all.ThreadPoolExecutor')
-    @patch('src.pipeline.ingest_all.as_completed')
-    @patch('src.pipeline.utils.get_existing_dataset_ids')
+    @patch('src.statscan.ingest.ThreadPoolExecutor')
+    @patch('src.statscan.ingest.as_completed')
+    @patch('src.statscan.utils.get_existing_dataset_ids')
     @patch('pandas.read_parquet')
     def test_manifest_saved_after_ingestion(
         self, mock_read_parquet, mock_get_existing, mock_as_completed, mock_executor, mock_to_csv
@@ -274,7 +277,7 @@ class TestMainManifest:
         os.environ['LIMIT'] = '1'
 
         try:
-            ingest_all.main()
+            ingest.main()
         except SystemExit:
             pass
 
@@ -287,6 +290,30 @@ class TestMainManifest:
 
 class TestConvertCsvToParquet:
     """Test CSV to parquet conversion with PyArrow."""
+
+    @patch('src.statscan.ingest.subprocess.run')
+    def test_runs_conversion_in_subprocess(self, mock_subprocess_run):
+        """Test that conversion runs in isolated subprocess for memory efficiency."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / 'test.csv'
+            parquet_path = Path(tmp_dir) / 'test.parquet'
+
+            # Create minimal CSV
+            test_data = pd.DataFrame({'col': [1, 2]})
+            test_data.to_csv(csv_path, index=False)
+
+            # Call conversion
+            ingest.convert_csv_to_parquet(csv_path, parquet_path)
+
+            # Verify subprocess.run was called
+            mock_subprocess_run.assert_called_once()
+            call_args = mock_subprocess_run.call_args
+
+            # Verify subprocess parameters
+            assert call_args[1]['check'] is True
+            assert call_args[1]['capture_output'] is True
+            assert call_args[0][0][0] == sys.executable
+            assert call_args[0][0][1] == '-c'
 
     def test_converts_csv_to_parquet(self):
         """Test basic CSV to parquet conversion."""
@@ -302,7 +329,7 @@ class TestConvertCsvToParquet:
 
             # Convert to parquet
             parquet_path = Path(tmp_dir) / 'test.parquet'
-            ingest_all.convert_csv_to_parquet(csv_path, parquet_path)
+            ingest.convert_csv_to_parquet(csv_path, parquet_path)
 
             # Verify output file exists
             assert parquet_path.exists()
@@ -325,7 +352,7 @@ class TestConvertCsvToParquet:
 
             # Convert to parquet
             parquet_path = Path(tmp_dir) / 'test.parquet'
-            ingest_all.convert_csv_to_parquet(csv_path, parquet_path)
+            ingest.convert_csv_to_parquet(csv_path, parquet_path)
 
             # Verify column names are sanitized
             result = pq.read_table(parquet_path)
@@ -343,7 +370,7 @@ class TestConvertCsvToParquet:
 
             # Convert to parquet
             parquet_path = Path(tmp_dir) / 'test.parquet'
-            ingest_all.convert_csv_to_parquet(csv_path, parquet_path)
+            ingest.convert_csv_to_parquet(csv_path, parquet_path)
 
             # Verify all columns present
             result = pq.read_table(parquet_path)

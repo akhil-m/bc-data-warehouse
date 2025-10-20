@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  statscan-pipeline:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      - AWS_DEFAULT_REGION=us-east-2
+      - LIMIT=${LIMIT:-}  # Optional: set LIMIT=10 for testing
+    volumes:
+      - ~/.aws:/root/.aws:ro  # AWS credentials (read-only)
+      - ../data:/app/data      # Local data directory for inspection

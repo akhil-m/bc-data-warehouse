@@ -9,112 +9,174 @@ At its best it is ruthlessly efficient but also elegant, even beautiful.
 
 ---
 
+## ⚠️ CRITICAL: ALWAYS USE THE VENV
+
+**NEVER run `python` directly. ALWAYS use `source .venv/bin/activate` first.**
+
+This project has a virtual environment at `.venv/`. You MUST activate it before running any Python commands:
+
+```bash
+source .venv/bin/activate
+python script.py
+```
+
+If you run `python` without activating the venv, the command will fail with "command not found".
+
+---
+
+## ⚠️ MANDATORY: Functional Core / Imperative Shell Architecture
+
+**All new code MUST follow this pattern. No exceptions.**
+
+### The Pattern:
+- **Functional Core**: Pure functions with ALL complex logic, edge cases, conditionals
+- **Imperative Shell**: Thin I/O layer with minimal logic, just orchestration
+
+### Why:
+- Functional Core = 100% testable without mocks (deterministic, pure functions)
+- Imperative Shell = Minimal testing burden (thin wrapper)
+
+### Examples from Codebase:
+
+**Functional Core** (Pure, no I/O):
+```python
+def sanitize_column_names(columns):
+    """Pure transformation: list → list"""
+    return [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in columns]
+
+def filter_catalog(catalog_df, existing_ids, skip_invisible=True, limit=None):
+    """Pure transformation: DataFrame → DataFrame"""
+    filtered = catalog_df[~catalog_df['productId'].isin(existing_ids)]
+    if skip_invisible:
+        filtered = filtered[~filtered['title'].str.contains('INVISIBLE', na=False)]
+    if limit:
+        filtered = filtered.head(limit)
+    return filtered
+```
+
+**Imperative Shell** (I/O, orchestration only):
+```python
+def download_table(product_id, title):
+    """I/O layer: HTTP, files, subprocess - NO complex logic"""
+    url = f"{API_BASE}/getFullTableDownloadCSV/{product_id}/en"
+    resp = requests.get(url)
+    data = resp.json()
+    # ... file operations, no branching logic
+    return size_mb, file_path
+```
+
+### Testing Approach:
+- **Functional Core**: Direct function calls with real data, NO mocks, 100% coverage
+- **Imperative Shell**: Heavy mocking (requests, boto3, subprocess), test orchestration only
+
+### Rules:
+1. If it has complex logic → Functional Core
+2. If it does I/O → Imperative Shell (extract logic to Core first)
+3. Always write tests for new Functional Core functions
+4. Keep Shell functions thin enough that testing is trivial
+
+---
+
+## ✅ FC/IS Refactoring Complete (2025-10-19)
+
+**All code now follows strict Functional Core / Imperative Shell pattern.**
+
+### Pure Functions Added:
+
+1. **discover.py** - `extract_catalog_metadata(cubes)`
+   - Transforms API JSON → DataFrame rows
+   - 9 comprehensive tests (empty lists, missing fields, dimension counting)
+   - Location: `src/statscan/discover.py:13-33`
+
+2. **upload.py** - `validate_manifest_data(exists, df, error)`
+   - Validates manifest file state → (is_valid, error_msg)
+   - 8 edge case tests (missing file, empty data, validation order)
+   - Location: `src/statscan/upload.py:17-37`
+
+3. **ingest.py** - `generate_conversion_script(csv_path, output_path)`
+   - Generates subprocess script content (pure string transformation)
+   - 6 tests (path handling, determinism, sanitization consistency)
+   - Location: `src/statscan/ingest.py:81-108`
+
+### Test Suite Status:
+- **84 tests** (up from 76)
+- **100% pure function coverage** (no mocks needed for FC)
+- **100% bug fix verification** (all fixes have explicit tests)
+- **All tests passing** ✅
+
+### FC/IS Coverage by Module:
+
+| Module | Functional Core | Imperative Shell | Status |
+|--------|----------------|------------------|--------|
+| discover.py | `extract_catalog_metadata()` | `get_all_cubes()`, `main()` | ✅ Clean |
+| catalog.py | `enhance_catalog()` | `main()` | ✅ Clean |
+| crawler.py | `create_s3_targets()`, `create_crawler_update_params()` | `main()` | ✅ Clean |
+| ingest.py | `sanitize_column_names()`, `create_folder_name()`, `filter_catalog()`, `generate_conversion_script()` | `convert_csv_to_parquet()`, `download_table()`, `main()` | ✅ Clean |
+| upload.py | `validate_manifest_data()` | `upload_datasets()` | ✅ Clean |
+| utils.py | `extract_product_id_from_folder()` | `get_existing_dataset_ids()`, `get_existing_dataset_folders()` | ✅ Clean |
+
+---
+
 ## StatsCan Data Warehouse Plan
 
 ### Phase 1: Discover ✓
-**Script: `discover.py`**
 - Call `getAllCubesList` API → save to `catalog.parquet`
-- Capture metadata: productId, title, subject, frequency, releaseTime, dimensions, nbDatapoints, score
+- Capture metadata: productId, title, subject, frequency, releaseTime, dimensions, nbDatapoints
 - Output: 7985 datasets
-- Upload to S3: `s3://build-cananda-dw/statscan/catalog/catalog.parquet`
 
 ### Phase 2: Ingest ✓
-**Script: `ingest_all.py`**
 - Fetch CSV via `getFullTableDownloadCSV/{productId}/en` → download ZIP → extract CSV
-- **Memory-efficient streaming**: Stream ZIP to temp file, extract to disk, only hold DataFrame in memory
-- Sanitize column names (replace spaces/slashes/hyphens with underscores)
-- Convert to parquet (pandas)
-- Store in `data/{productId}-{descriptive-title}/{productId}.parquet`
-- Sequential processing (1 worker) to prevent memory exhaustion with large files
-- 10GB target, 5GB per-file limit (600s download timeout)
-- Upload to S3 via `upload_to_s3.sh`
-- **Ingestion modes:**
-  - Manual: Run `python ingest_all.py` with optional `LIMIT` env var
-  - Automated: GitHub Actions workflow `statscan-ingest.yml` (manual trigger with LIMIT input)
+- Memory-efficient conversion: PyArrow CSV-to-parquet in subprocess (prevents memory accumulation)
+- Sanitize column names (spaces/slashes/hyphens → underscores)
+- Store as `data/{productId}-{title}/{productId}.parquet`
+- Sequential processing (1 worker), uploads to S3
+- Each conversion runs in isolated subprocess (memory released on exit)
 
 ### Phase 3: Warehouse ✓
-- S3: `s3://build-cananda-dw/statscan/data/` (268 datasets uploaded)
-- Glue Crawler: configured with 269 separate S3 targets (268 datasets + catalog)
-  - **Critical:** Crawler must have individual S3 targets to avoid merging tables with >70% schema similarity
-  - Use `update_crawler.py` to update crawler with new dataset folders from `dataset_folders.txt`
-- Catalog: `s3://build-cananda-dw/statscan/catalog/catalog.parquet`
-  - **Single unified catalog** (no base/enhanced split)
-  - Columns: productId, title, subject, frequency, releaseTime, dimensions, nbDatapoints, score, available
-  - `available` flag updated by `regenerate_catalog.py` based on S3 contents
-  - Queryable in Athena for dataset discovery
-- Athena: queryable with Presto SQL
-  - Database: `statscan`, Region: `us-east-2`
-  - Table names contain special chars, require double quotes: `SELECT * FROM "table_name"`
+- **S3**: `s3://build-cananda-dw/statscan/data/` (~395 datasets, ~3GB)
+- **Glue Crawler**: Synced with S3 folders via `crawler.py` (individual S3 targets to prevent table merging)
+- **Catalog**: `s3://build-cananda-dw/statscan/catalog/catalog.parquet`
+  - Columns: productId, title, subject, frequency, releaseTime, dimensions, nbDatapoints, available
+  - Updated by `catalog.py` based on S3 contents
+  - Processed in productId order (starts with small Bank of Canada/government datasets, larger trade/labor/immigration datasets come later)
+- **Athena**: Presto SQL, database `statscan` (us-east-2), tables require double quotes
 
 ### Phase 4: Chat ✓
-**Solution: LibreChat + FastMCP**
-
-**Coolify Deployment (production):**
-- LibreChat: `ghcr.io/danny-avila/librechat:latest` (production image, not dev)
-- FastMCP: `akhil1710/fastmcp-athena:latest` (Docker Hub, linux/amd64)
-- FastMCP runs on port 8001
-- LibreChat configured via `librechat.yaml` (version 1.3.0, mounted from Coolify)
-- MCP connection: `http://fastmcp:8001/mcp` (Docker network)
-- AWS credentials passed as environment variables (no IAM role)
-- **Key fixes:**
-  - Built amd64 image (not arm64) for cloud deployment
-  - Removed logs volume to fix permission issues
-  - Config version 1.3.0 required for MCP support
-
-**ECS Deployment (decommissioned):**
-- Was running on ECS Fargate - shut down to reduce costs
-- Replaced by Coolify deployment
-
-**Files:**
-- `athena_mcp_server.py`: FastMCP server with `query()` tool (port 8001)
-- `Dockerfile.fastmcp`: Container for FastMCP server
-- `librechat.yaml`: MCP server configuration (mounted into LibreChat)
-- `docker-compose.yml`: Local development setup (no hardcoded credentials)
+**Coolify Deployment:**
+- LibreChat: `ghcr.io/danny-avila/librechat:latest`
+- FastMCP: `akhil1710/fastmcp-athena:latest` (port 8001, linux/amd64)
+- Config: `librechat.yaml` (v1.3.0), MCP at `http://fastmcp:8001/mcp`
+- AWS credentials via environment variables
 
 ### Phase 5: Quality & Testing ✓
-**Architecture: Functional Core / Imperative Shell**
-- Refactored all scripts to separate pure functions (testable) from I/O operations
-- Pure functions: 100% test coverage
-- I/O layer: integration tested with mocks
+**Architecture:** Functional Core / Imperative Shell
+- Pure functions separated from I/O (100% test coverage on core logic)
+- 83 tests, 70%+ coverage (pytest + pytest-cov + pytest-mock)
+- Pre-push hook runs tests (`.git/hooks/pre-push`)
 
-**Test Infrastructure:**
-- pytest + pytest-cov + pytest-mock
-- 65 tests, 69% coverage overall
-- Coverage threshold: 69% (CI fails below this)
-- Files: `tests/test_*.py` for all modules
+**Status:** ~395 datasets ingested (~3GB), all parquet files follow consistent StatsCan schema (REF_DATE, GEO, UOM, SCALAR_FACTOR, VALUE + dimensions)
 
-**CI/CD:**
-- **Local validation:** Pre-push hook (`.git/hooks/pre-push` symlinked from `hooks/pre-push`)
-  - Runs tests before every push (1-2 seconds)
-  - Prevents pushing broken code
-  - Bypass with `git push --no-verify`
-- **GitHub Actions:**
-  - `test.yml`: Run tests on PRs
-  - `statscan-ingest.yml`: Manual workflow for ingestion with optional LIMIT
+### Phase 6: Docker Deployment ✓
+**Structure:**
+```
+src/statscan/    # discover.py, ingest.py, upload.py, catalog.py, crawler.py
+src/mcp/         # FastMCP Athena server
+docker/          # Dockerfile, docker-compose.yml, run_statscan.sh
+tests/statscan/  # 83 tests
+```
 
-**Refactored Modules:**
-- `ingest_all.py`: Pure functions (sanitize_column_names, create_folder_name, should_download, filter_catalog)
-- `regenerate_catalog.py`: Pure function (enhance_catalog) - simplified to only update `available` flags
-- `update_crawler.py`: Pure functions (parse_folder_list, create_s3_targets, create_crawler_update_params)
-- `utils.py`: Pure function (extract_product_id_from_folder)
+**Commands:**
+```bash
+# Test run
+LIMIT=5 docker compose -f docker/docker-compose.yml up
 
-**Data Quality Findings:**
-- StatsCan API provides normalized columnar data (not formatted reports)
-- All parquet files have consistent schema: REF_DATE, GEO, UOM, SCALAR_FACTOR, VALUE + dataset-specific dimensions
-- Schema overlap 70-79% across datasets (why Glue crawler initially merged them)
+# Production run (respects LIMIT env var)
+LIMIT=100 docker compose -f docker/docker-compose.yml up
+```
 
-**Current Status:**
-- 268 datasets ingested (268/7985 = 3.4% of catalog)
-- Using full catalog (switched from immigration subset)
-- All datasets stored in `data/{productId}-{title}/` folders
-- Uploaded to S3 and cataloged in Glue Athena
+**Pipeline:** discover → ingest → upload → catalog → crawler
 
-**Data Gaps:**
-- StatsCan does NOT have Express Entry data (CRS scores, draws, invitations)
-- Express Entry selection process data managed by IRCC, not StatsCan
-- StatsCan focuses on immigration outcomes (who came, income, settlement), not selection process
-
-### Phase 6: IRCC Open Data (Next)
+### Phase 7: IRCC Open Data (Next)
 **Source:** https://search.open.canada.ca/opendata/?owner_org=cic
 
 **Available Datasets:**
@@ -138,7 +200,7 @@ You are a Canadian economic data analyst. You help users explore and analyze Sta
 
 Dataset Discovery:
 - Query the `catalog` table first to discover available datasets
-- Columns: productId, title, subject, frequency, releaseTime, dimensions, nbDatapoints, score, available
+- Columns: productId, title, subject, frequency, releaseTime, dimensions, nbDatapoints, available
 - Filter by `available = true` to see which datasets are in the warehouse
 - Search titles for keywords related to user's question
 

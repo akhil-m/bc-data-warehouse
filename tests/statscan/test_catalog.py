@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch, mock_open
 import pandas as pd
-from src.pipeline import regenerate_catalog
+from src.statscan import catalog
 
 
 class TestEnhanceCatalog:
@@ -10,7 +10,7 @@ class TestEnhanceCatalog:
 
     def test_marks_availability_correctly(self):
         """Test that available column is set based on existing IDs."""
-        catalog = pd.DataFrame({
+        catalog_df = pd.DataFrame({
             'productId': [1, 2, 3, 4, 5],
             'title': ['Dataset A', 'Dataset B', 'Dataset C', 'Dataset D', 'Dataset E'],
             'frequency_label': ['Monthly', 'Annual', 'Quarterly', 'Monthly', 'Annual'],
@@ -19,13 +19,13 @@ class TestEnhanceCatalog:
         })
         existing = {1, 3, 5}
 
-        result = regenerate_catalog.enhance_catalog(catalog, existing)
+        result = catalog.enhance_catalog(catalog_df,existing)
 
         assert result['available'].tolist() == [True, False, True, False, True]
 
     def test_preserves_all_columns(self):
         """Test that all columns are preserved."""
-        catalog = pd.DataFrame({
+        catalog_df = pd.DataFrame({
             'productId': [1, 2],
             'title': ['A', 'B'],
             'subject': ['Economics', 'Immigration'],
@@ -37,15 +37,15 @@ class TestEnhanceCatalog:
             'available': [False, False]
         })
 
-        result = regenerate_catalog.enhance_catalog(catalog, {1})
+        result = catalog.enhance_catalog(catalog_df,{1})
 
         # All columns preserved
-        assert set(result.columns) == set(catalog.columns)
-        assert len(result.columns) == len(catalog.columns)
+        assert set(result.columns) == set(catalog_df.columns)
+        assert len(result.columns) == len(catalog_df.columns)
 
     def test_no_existing_datasets(self):
         """Test enhancement when no datasets exist in S3."""
-        catalog = pd.DataFrame({
+        catalog_df = pd.DataFrame({
             'productId': [1, 2, 3],
             'title': ['A', 'B', 'C'],
             'frequency_label': ['Monthly', 'Annual', 'Quarterly'],
@@ -53,14 +53,14 @@ class TestEnhanceCatalog:
             'available': [False] * 3
         })
 
-        result = regenerate_catalog.enhance_catalog(catalog, set())
+        result = catalog.enhance_catalog(catalog_df,set())
 
         assert result['available'].sum() == 0
         assert all(result['available'] == False)
 
     def test_all_datasets_exist(self):
         """Test enhancement when all datasets exist in S3."""
-        catalog = pd.DataFrame({
+        catalog_df = pd.DataFrame({
             'productId': [1, 2, 3],
             'title': ['A', 'B', 'C'],
             'frequency_label': ['Monthly', 'Annual', 'Quarterly'],
@@ -69,33 +69,33 @@ class TestEnhanceCatalog:
         })
         existing = {1, 2, 3}
 
-        result = regenerate_catalog.enhance_catalog(catalog, existing)
+        result = catalog.enhance_catalog(catalog_df,existing)
 
         assert result['available'].sum() == 3
         assert all(result['available'] == True)
 
     def test_preserves_original_dataframe(self):
         """Test that original catalog is not modified."""
-        catalog = pd.DataFrame({
+        catalog_df = pd.DataFrame({
             'productId': [1, 2],
             'title': ['A', 'B'],
             'frequency_label': ['Monthly', 'Annual'],
             'releaseTime': ['2024-01-01', '2024-02-01'],
             'available': [False] * 2
         })
-        original_data = catalog.copy()
+        original_data = catalog_df.copy()
 
-        regenerate_catalog.enhance_catalog(catalog, {1})
+        catalog.enhance_catalog(catalog_df, {1})
 
         # Original should be unchanged (except available column which we're testing)
-        pd.testing.assert_frame_equal(catalog, original_data)
+        pd.testing.assert_frame_equal(catalog_df, original_data)
 
 
 class TestMainIntegration:
     """Test main() orchestration with mocked I/O."""
 
     @patch('boto3.client')
-    @patch('src.pipeline.utils.get_existing_dataset_ids')
+    @patch('src.statscan.utils.get_existing_dataset_ids')
     @patch('pandas.read_parquet')
     def test_main_orchestration(self, mock_read_parquet, mock_get_existing, mock_boto_client):
         """Test that main() calls all functions in correct order."""
@@ -115,7 +115,7 @@ class TestMainIntegration:
         mock_boto_client.return_value = mock_s3
 
         # Run main
-        regenerate_catalog.main()
+        catalog.main()
 
         # Verify catalog was read
         mock_read_parquet.assert_called_once_with('catalog.parquet')

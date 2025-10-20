@@ -8,6 +8,9 @@ import requests
 import zipfile
 import tempfile
 import os
+import subprocess
+import sys
+import tracemalloc
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
@@ -16,8 +19,6 @@ from . import utils
 
 API_BASE = "https://www150.statcan.gc.ca/t1/wds/rest"
 MAX_TOTAL_GB = 10  # Just immigration data
-MAX_DOWNLOAD_MB = 100  # Skip ZIP files larger than this (heuristic to save bandwidth)
-MAX_UNCOMPRESSED_MB = 200  # Skip uncompressed CSVs larger than this (accurate check after download)
 NUM_WORKERS = 1  # Sequential processing to avoid memory exhaustion
 
 
@@ -50,32 +51,6 @@ def create_folder_name(product_id, title):
     return f"{product_id}-{clean_title}"
 
 
-def should_download(file_size_bytes, max_mb):
-    """Check if file is within download size limit.
-
-    Args:
-        file_size_bytes: File size in bytes
-        max_mb: Maximum allowed size in MB
-
-    Returns:
-        True if file should be downloaded, False otherwise
-    """
-    return file_size_bytes <= max_mb * 1e6
-
-
-def should_process_csv(uncompressed_size_bytes, max_mb):
-    """Check if uncompressed CSV is within size limit.
-
-    Args:
-        uncompressed_size_bytes: Uncompressed CSV size in bytes
-        max_mb: Maximum allowed size in MB
-
-    Returns:
-        True if CSV should be processed, False otherwise
-    """
-    return uncompressed_size_bytes <= max_mb * 1e6
-
-
 def filter_catalog(catalog_df, existing_ids, skip_invisible=True, limit=None):
     """Apply all filtering logic to catalog: existing datasets, INVISIBLE, and limit.
 
@@ -104,12 +79,42 @@ def filter_catalog(catalog_df, existing_ids, skip_invisible=True, limit=None):
     return filtered
 
 
-def convert_csv_to_parquet(csv_path, output_path):
-    """Convert CSV to parquet using PyArrow for memory efficiency.
+def generate_conversion_script(csv_path, output_path):
+    """Generate Python script for CSV to parquet conversion.
 
-    Uses PyArrow's streaming CSV reader to handle large files without
-    loading entire dataset into memory. Column names are sanitized
-    during conversion.
+    This is a pure function that returns the subprocess script content.
+    The script uses the same sanitization logic as sanitize_column_names().
+
+    Args:
+        csv_path: Path to input CSV file (str or Path)
+        output_path: Path to output parquet file (str or Path)
+
+    Returns:
+        String containing Python script to execute in subprocess
+    """
+    return f"""
+import pyarrow.csv as pa_csv
+import pyarrow.parquet as pq
+
+# Read CSV
+table = pa_csv.read_csv('{csv_path}')
+
+# Sanitize column names (same logic as sanitize_column_names())
+columns = table.column_names
+sanitized = [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in columns]
+table = table.rename_columns(sanitized)
+
+# Write parquet
+pq.write_table(table, '{output_path}')
+"""
+
+
+def convert_csv_to_parquet(csv_path, output_path):
+    """Convert CSV to parquet using PyArrow in a subprocess for memory isolation.
+
+    Each conversion runs in a separate subprocess that exits after completion,
+    ensuring all memory is released back to the OS. This prevents memory
+    accumulation when processing hundreds of datasets sequentially.
 
     Args:
         csv_path: Path to input CSV file (str or Path)
@@ -118,15 +123,11 @@ def convert_csv_to_parquet(csv_path, output_path):
     Returns:
         None (writes file to disk)
     """
-    # Read CSV with PyArrow (memory efficient)
-    table = pa_csv.read_csv(str(csv_path))
+    # Core: Generate conversion script
+    script = generate_conversion_script(csv_path, output_path)
 
-    # Sanitize column names
-    sanitized_names = sanitize_column_names(table.column_names)
-    table = table.rename_columns(sanitized_names)
-
-    # Write parquet
-    pq.write_table(table, str(output_path))
+    # I/O: Run in subprocess for memory isolation
+    subprocess.run([sys.executable, '-c', script], check=True, capture_output=True)
 
 
 # === I/O Layer ===
@@ -142,7 +143,7 @@ def download_table(product_id, title):
         title: Dataset title
 
     Returns:
-        Size of parquet file in MB, or None if skipped
+        Tuple of (size_mb, file_path) where file_path is relative to data/, or None if skipped
     """
     url = f"{API_BASE}/getFullTableDownloadCSV/{product_id}/en"
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -158,14 +159,10 @@ def download_table(product_id, title):
     data = resp.json()
     zip_url = data['object']
 
-    # Check file size BEFORE downloading
+    # Get file size for progress tracking
     head_resp = requests.head(zip_url, headers=headers, timeout=30)
     head_resp.raise_for_status()
     total_size = int(head_resp.headers.get('content-length', 0))
-
-    if not should_download(total_size, MAX_DOWNLOAD_MB):
-        print(f"{display_title} - Skipped (>{MAX_DOWNLOAD_MB}MB, {total_size/1e6:.0f}MB)")
-        return None
 
     # Stream ZIP to temp file on disk
     zip_resp = requests.get(zip_url, headers=headers, timeout=600, stream=True)
@@ -190,16 +187,6 @@ def download_table(product_id, title):
 
     print(f"{display_title} - Downloaded, extracting...")
 
-    # Check uncompressed size before extraction
-    with zipfile.ZipFile(zip_path) as z:
-        csv_info = z.infolist()[0]
-        uncompressed_mb = csv_info.file_size / 1e6
-
-        if not should_process_csv(csv_info.file_size, MAX_UNCOMPRESSED_MB):
-            print(f"{display_title} - Skipped (CSV too large: {uncompressed_mb:.0f}MB uncompressed)")
-            Path(zip_path).unlink()
-            return None
-
     # Extract CSV to temp directory
     with tempfile.TemporaryDirectory() as tmp_dir:
         with zipfile.ZipFile(zip_path) as z:
@@ -220,8 +207,12 @@ def download_table(product_id, title):
     Path(zip_path).unlink()
 
     size_mb = out_file.stat().st_size / 1e6
-    print(f"{display_title} - Complete ({size_mb:.1f}MB)")
-    return size_mb
+    file_path = str(out_file.relative_to('data'))
+
+    # Log memory usage
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"{display_title} - Complete ({size_mb:.1f}MB) [Memory: {current/1e6:.1f}MB current, {peak/1e6:.1f}MB peak]")
+    return size_mb, file_path
 
 
 # === Orchestration ===
@@ -232,9 +223,11 @@ def process_dataset(product_id, title, state_lock, shared_state):
     Wraps download_table() with error handling and shared state management.
     """
     try:
-        size_mb = download_table(product_id, title)
-        if size_mb is None:  # File was skipped
+        result = download_table(product_id, title)
+        if result is None:  # File was skipped
             return None
+
+        size_mb, file_path = result
 
         # Update shared state
         with state_lock:
@@ -242,7 +235,8 @@ def process_dataset(product_id, title, state_lock, shared_state):
             shared_state['ingested'].append({
                 'productId': product_id,
                 'title': title,
-                'size_mb': size_mb
+                'size_mb': size_mb,
+                'file_path': file_path
             })
 
         return size_mb
@@ -256,6 +250,9 @@ def process_dataset(product_id, title, state_lock, shared_state):
 
 def main():
     """Main ingestion orchestration."""
+    # Start memory tracking
+    tracemalloc.start()
+
     # I/O: Load catalog
     catalog = pd.read_parquet('catalog.parquet')
 

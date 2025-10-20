@@ -67,11 +67,14 @@ def main():
         "statscan"
     )
 
-    # I/O: Update crawler via AWS API
+    # I/O: Update and run crawler via AWS API
     client = boto3.client("glue", region_name="us-east-2")
     client.update_crawler(**update_params)
-
     print(f"✓ Updated crawler '{CRAWLER_NAME}' with {len(targets)} S3 targets")
+
+    # Start the crawler to actually catalog the datasets
+    client.start_crawler(Name=CRAWLER_NAME)
+    print(f"✓ Started crawler '{CRAWLER_NAME}' (catalog will be updated)")
 
 
 if __name__ == '__main__':
