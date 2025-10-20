@@ -142,9 +142,10 @@ class TestMainIntegration:
         assert call_args['Name'] == 'statscan'
         assert call_args['DatabaseName'] == 'statscan'
         assert call_args['Role'] == 'service-role/AWSGlueServiceRole-statscan'
-        assert len(call_args['Targets']['S3Targets']) == 2
+        assert len(call_args['Targets']['S3Targets']) == 3  # 2 data folders + 1 catalog
         assert call_args['Targets']['S3Targets'][0]['Path'] == 's3://build-cananda-dw/statscan/data/12100163-trade/'
         assert call_args['Targets']['S3Targets'][1]['Path'] == 's3://build-cananda-dw/statscan/data/43100050-immigration/'
+        assert call_args['Targets']['S3Targets'][2]['Path'] == 's3://build-cananda-dw/statscan/catalog/'
 
         # Verify crawler was started after update
         mock_glue.start_crawler.assert_called_once_with(Name='statscan')
