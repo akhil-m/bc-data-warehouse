@@ -57,7 +57,6 @@ def main():
     # Save
     df.to_parquet('catalog.parquet', index=False)
     print(f"\nSaved to catalog.parquet")
-    print(f"\nTop 10 datasets:\n{df.head(10)[['productId', 'title']]}")
 
 
 if __name__ == '__main__':
