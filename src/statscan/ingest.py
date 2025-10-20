@@ -109,6 +109,64 @@ pq.write_table(table, '{output_path}')
 """
 
 
+def format_display_title(product_id, title, max_len=50):
+    """Format dataset title for display with truncation.
+
+    Args:
+        product_id: Dataset product ID (int)
+        title: Dataset title (str)
+        max_len: Maximum title length before truncation (default 50)
+
+    Returns:
+        Formatted string in "[productId] title..." format
+    """
+    title_part = title[:max_len] + "..." if len(title) > max_len else title
+    return f"[{product_id}] {title_part}"
+
+
+def format_error_message(error, max_len=50):
+    """Format exception for display output.
+
+    Args:
+        error: Exception object
+        max_len: Maximum error message length (default 50)
+
+    Returns:
+        Error type name if message too long, otherwise full message
+    """
+    error_str = str(error)
+    return type(error).__name__ if len(error_str) > max_len else error_str
+
+
+def calculate_download_progress(downloaded, total):
+    """Calculate download progress percentage.
+
+    Args:
+        downloaded: Bytes downloaded so far (int)
+        total: Total bytes to download (int)
+
+    Returns:
+        Progress percentage as integer (0-100)
+    """
+    if total <= 0:
+        return 0
+    return int(100 * downloaded / total)
+
+
+def should_print_progress(current_pct, last_printed_pct, interval=10):
+    """Determine if progress update should be printed.
+
+    Args:
+        current_pct: Current progress percentage (int)
+        last_printed_pct: Last printed percentage (int)
+        interval: Print interval in percentage points (default 10)
+
+    Returns:
+        True if we've crossed the next interval threshold
+    """
+    return current_pct >= last_printed_pct + interval
+
+
 def convert_csv_to_parquet(csv_path, output_path):
     """Convert CSV to parquet using PyArrow in a subprocess for memory isolation.
 
@@ -148,9 +206,8 @@ def download_table(product_id, title):
     url = f"{API_BASE}/getFullTableDownloadCSV/{product_id}/en"
     headers = {'User-Agent': 'Mozilla/5.0'}
 
-    # Truncate title for display
-    title_part = title[:50] + "..." if len(title) > 50 else title
-    display_title = f"[{product_id}] {title_part}"
+    # Core: Format display title
+    display_title = format_display_title(product_id, title)
 
     # Get ZIP URL
     print(f"{display_title} - Starting...")
@@ -176,12 +233,11 @@ def download_table(product_id, title):
             tmp_zip.write(chunk)
             downloaded += len(chunk)
 
-            # Print progress every 10%
-            if total_size > 0:
-                pct = int(100 * downloaded / total_size)
-                if pct >= last_pct + 10:
-                    print(f"{display_title} - Downloading {downloaded/1e6:.0f}/{total_size/1e6:.0f}MB ({pct}%)")
-                    last_pct = pct
+            # Core: Calculate and check if we should print progress
+            current_pct = calculate_download_progress(downloaded, total_size)
+            if should_print_progress(current_pct, last_pct):
+                print(f"{display_title} - Downloading {downloaded/1e6:.0f}/{total_size/1e6:.0f}MB ({current_pct}%)")
+                last_pct = current_pct
 
         zip_path = tmp_zip.name
 
@@ -241,9 +297,9 @@ def process_dataset(product_id, title, state_lock, shared_state):
 
         return size_mb
     except Exception as e:
-        title_part = title[:50] + "..." if len(title) > 50 else title
-        display_title = f"[{product_id}] {title_part}"
-        error_msg = type(e).__name__ if len(str(e)) > 50 else str(e)
+        # Core: Format display strings
+        display_title = format_display_title(product_id, title)
+        error_msg = format_error_message(e)
         print(f"{display_title} - Error: {error_msg}")
         return None
 
@@ -305,8 +361,8 @@ def main():
             try:
                 future.result()  # This will raise if the worker raised
             except Exception as e:
-                title_part = title[:50] + "..." if len(title) > 50 else title
-                display_title = f"[{product_id}] {title_part}"
+                # Core: Format display strings
+                display_title = format_display_title(product_id, title)
                 print(f"{display_title} - Unexpected error: {type(e).__name__}")
 
     # Save manifest

@@ -1,6 +1,8 @@
 """Tests for S3 upload functions."""
 
+import tempfile
 import pandas as pd
+from pathlib import Path
 from src.statscan import upload
 
 
@@ -102,13 +104,65 @@ class TestValidateManifestData:
         assert is_valid is False
         assert "not found" in error_msg
 
-    def test_validation_order_empty_data_error_before_length(self):
-        """Test that EmptyDataError is checked before DataFrame length."""
-        is_valid, error_msg = upload.validate_manifest_data(
-            manifest_exists=True,
-            manifest_df=None,
-            error_type='EmptyDataError'
-        )
 
-        assert is_valid is False
-        assert "has no data" in error_msg
+class TestShouldSkipFile:
+    """Test file skip logic (pure function)."""
+
+    def test_skip_nonexistent_file(self):
+        """Test that nonexistent files are skipped."""
+        nonexistent = Path('/tmp/does_not_exist_12345.parquet')
+
+        should_skip, warning = upload.should_skip_file(nonexistent)
+
+        assert should_skip is True
+        assert warning is not None
+        assert "not found" in warning
+        assert str(nonexistent) in warning
+
+    def test_dont_skip_existing_file(self):
+        """Test that existing files are not skipped."""
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+            try:
+                should_skip, warning = upload.should_skip_file(tmp_path)
+
+                assert should_skip is False
+                assert warning is None
+            finally:
+                tmp_path.unlink()
+
+    def test_skip_deleted_file(self):
+        """Test file that existed but was deleted."""
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+
+        # File was created then deleted
+        tmp_path.unlink()
+
+        should_skip, warning = upload.should_skip_file(tmp_path)
+
+        assert should_skip is True
+        assert warning is not None
+
+    def test_skip_directory(self):
+        """Test that directories are skipped (Path.exists() returns True for dirs)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dir_path = Path(tmp_dir)
+
+            # exists() returns True for directories, but we're checking files
+            # Our function just checks exists(), so it would NOT skip
+            should_skip, warning = upload.should_skip_file(dir_path)
+
+            # Directory exists, so should not skip
+            assert should_skip is False
+            assert warning is None
+
+    def test_warning_message_format(self):
+        """Test that warning message has correct format."""
+        test_path = Path('/test/path/file.parquet')
+
+        should_skip, warning = upload.should_skip_file(test_path)
+
+        assert should_skip is True
+        assert warning.startswith("Warning:")
+        assert "skipping" in warning

@@ -37,6 +37,20 @@ def validate_manifest_data(manifest_exists, manifest_df=None, error_type=None):
     return True, None
 
 
+def should_skip_file(file_path):
+    """Determine if file should be skipped during upload.
+
+    Args:
+        file_path: Path object to check
+
+    Returns:
+        Tuple of (should_skip: bool, warning_message: str or None)
+    """
+    if not file_path.exists():
+        return True, f"Warning: {file_path} not found, skipping"
+    return False, None
+
+
 # === I/O Layer ===
 
 def upload_datasets():
@@ -71,8 +85,10 @@ def upload_datasets():
         file_path = Path(DATA_DIR) / row['file_path']
         s3_key = f"{PREFIX}{row['file_path']}"
 
-        if not file_path.exists():
-            print(f"Warning: {file_path} not found, skipping")
+        # Core: Check if file should be skipped
+        should_skip, warning_msg = should_skip_file(file_path)
+        if should_skip:
+            print(warning_msg)
             continue
 
         print(f"Uploading {row['file_path']}")

@@ -212,3 +212,225 @@ class TestFilterCatalog:
         result = ingest.filter_catalog(catalog, set(), skip_invisible=False)
 
         assert len(result) == 0
+
+
+class TestFormatDisplayTitle:
+    """Test display title formatting logic."""
+
+    def test_short_title_no_truncation(self):
+        """Test that short titles are not truncated."""
+        result = ingest.format_display_title(12100163, 'International Trade')
+
+        assert result == '[12100163] International Trade'
+
+    def test_long_title_gets_truncated(self):
+        """Test that titles over 50 chars are truncated."""
+        long_title = 'This is a very long dataset title that exceeds fifty characters easily'
+        result = ingest.format_display_title(123, long_title)
+
+        assert result.startswith('[123]')
+        assert result.endswith('...')
+        assert len(result) <= 55 + len('[123] ')  # 50 chars + "[123] " + "..."
+
+    def test_exactly_50_chars_no_truncation(self):
+        """Test title exactly 50 chars long."""
+        title_50 = 'A' * 50
+        result = ingest.format_display_title(456, title_50)
+
+        assert result == f'[456] {title_50}'
+        assert not result.endswith('...')
+
+    def test_51_chars_gets_truncated(self):
+        """Test that 51 char title gets truncated."""
+        title_51 = 'A' * 51
+        result = ingest.format_display_title(789, title_51)
+
+        assert result.endswith('...')
+        assert 'A' * 50 in result
+
+    def test_custom_max_len(self):
+        """Test custom truncation length."""
+        long_title = 'A' * 100
+        result = ingest.format_display_title(999, long_title, max_len=20)
+
+        assert result == f'[999] {"A" * 20}...'
+
+    def test_empty_title(self):
+        """Test empty title edge case."""
+        result = ingest.format_display_title(111, '')
+
+        assert result == '[111] '
+
+    def test_unicode_title(self):
+        """Test title with unicode characters."""
+        result = ingest.format_display_title(222, 'Données économiques 中文')
+
+        assert result == '[222] Données économiques 中文'
+
+
+class TestFormatErrorMessage:
+    """Test error message formatting logic."""
+
+    def test_short_error_message(self):
+        """Test that short error messages are returned as-is."""
+        error = ValueError('Short error')
+        result = ingest.format_error_message(error)
+
+        assert result == 'Short error'
+
+    def test_long_error_message_returns_type(self):
+        """Test that long error messages return exception type."""
+        long_msg = 'A' * 100
+        error = ValueError(long_msg)
+        result = ingest.format_error_message(error)
+
+        assert result == 'ValueError'
+
+    def test_exactly_50_chars_not_truncated(self):
+        """Test message exactly 50 chars long."""
+        msg_50 = 'A' * 50
+        error = RuntimeError(msg_50)
+        result = ingest.format_error_message(error)
+
+        assert result == msg_50
+
+    def test_51_chars_returns_type(self):
+        """Test that 51 char message returns type."""
+        msg_51 = 'A' * 51
+        error = KeyError(msg_51)
+        result = ingest.format_error_message(error)
+
+        assert result == 'KeyError'
+
+    def test_custom_max_len(self):
+        """Test custom truncation length."""
+        error = Exception('This is a somewhat long error message')
+        result = ingest.format_error_message(error, max_len=10)
+
+        assert result == 'Exception'
+
+    def test_empty_error_message(self):
+        """Test exception with empty message."""
+        error = ValueError('')
+        result = ingest.format_error_message(error)
+
+        assert result == ''
+
+    def test_various_exception_types(self):
+        """Test different exception types."""
+        errors = [
+            (ValueError('test'), 'test'),
+            (TypeError('another'), 'another'),
+            (RuntimeError('A' * 60), 'RuntimeError'),
+            (KeyError('B' * 60), 'KeyError'),
+        ]
+
+        for error, expected in errors:
+            result = ingest.format_error_message(error)
+            assert result == expected
+
+
+class TestCalculateDownloadProgress:
+    """Test download progress calculation logic."""
+
+    def test_zero_downloaded_zero_total(self):
+        """Test edge case of zero total."""
+        result = ingest.calculate_download_progress(0, 0)
+        assert result == 0
+
+    def test_negative_total(self):
+        """Test edge case of negative total."""
+        result = ingest.calculate_download_progress(100, -1)
+        assert result == 0
+
+    def test_zero_downloaded_positive_total(self):
+        """Test 0% progress."""
+        result = ingest.calculate_download_progress(0, 1000)
+        assert result == 0
+
+    def test_half_downloaded(self):
+        """Test 50% progress."""
+        result = ingest.calculate_download_progress(500, 1000)
+        assert result == 50
+
+    def test_full_downloaded(self):
+        """Test 100% progress."""
+        result = ingest.calculate_download_progress(1000, 1000)
+        assert result == 100
+
+    def test_fractional_progress_rounds_down(self):
+        """Test that fractional percentages are truncated."""
+        result = ingest.calculate_download_progress(333, 1000)
+        assert result == 33  # 33.3% rounds down
+
+    def test_large_numbers(self):
+        """Test with large byte counts (GBs)."""
+        result = ingest.calculate_download_progress(1500000000, 3000000000)
+        assert result == 50
+
+    def test_various_percentages(self):
+        """Test various percentage calculations."""
+        test_cases = [
+            (10, 100, 10),
+            (25, 100, 25),
+            (99, 100, 99),
+            (1, 100, 1),
+            (100, 1000, 10),
+        ]
+
+        for downloaded, total, expected in test_cases:
+            result = ingest.calculate_download_progress(downloaded, total)
+            assert result == expected
+
+
+class TestShouldPrintProgress:
+    """Test progress printing decision logic."""
+
+    def test_first_print_at_interval(self):
+        """Test that first interval triggers print."""
+        result = ingest.should_print_progress(10, -1, interval=10)
+        assert result is True
+
+    def test_no_print_before_interval(self):
+        """Test that we don't print before reaching interval."""
+        result = ingest.should_print_progress(5, 0, interval=10)
+        assert result is False
+
+    def test_print_at_exactly_interval(self):
+        """Test print at exactly the interval boundary."""
+        result = ingest.should_print_progress(20, 10, interval=10)
+        assert result is True
+
+    def test_no_print_just_before_interval(self):
+        """Test no print just before interval."""
+        result = ingest.should_print_progress(19, 10, interval=10)
+        assert result is False
+
+    def test_print_past_interval(self):
+        """Test print when we've exceeded interval."""
+        result = ingest.should_print_progress(25, 10, interval=10)
+        assert result is True
+
+    def test_custom_interval(self):
+        """Test with custom interval (5%)."""
+        test_cases = [
+            (5, 0, True),   # First 5%
+            (4, 0, False),  # Not yet
+            (10, 5, True),  # Next 5%
+            (14, 10, False),  # Not yet
+            (15, 10, True),  # Next interval
+        ]
+
+        for current, last, expected in test_cases:
+            result = ingest.should_print_progress(current, last, interval=5)
+            assert result == expected
+
+    def test_large_jump_in_progress(self):
+        """Test when progress jumps multiple intervals."""
+        result = ingest.should_print_progress(50, 10, interval=10)
+        assert result is True
+
+    def test_zero_progress(self):
+        """Test at start (0%) - should not print yet."""
+        result = ingest.should_print_progress(0, -1, interval=10)
+        assert result is False  # 0 < -1 + 10, so not ready to print
