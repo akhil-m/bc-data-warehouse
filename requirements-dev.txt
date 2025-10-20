@@ -1,3 +1,6 @@
+# Include production dependencies
+-r requirements.txt
+
 # Development dependencies
 pytest>=8.0.0
 pytest-cov>=4.1.0

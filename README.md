@@ -27,7 +27,6 @@ hooks/              # Git hooks (pre-push)
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install pandas boto3 requests pyarrow
 pip install -r requirements-dev.txt
 ```
 
@@ -39,9 +38,11 @@ Enable pre-push hook to run tests before pushing:
 ln -s ../../hooks/pre-push .git/hooks/pre-push
 ```
 
-This runs tests locally before pushing to catch issues immediately (1-2 seconds vs waiting for CI).
+This runs tests locally before pushing to catch issues immediately.
 
 ### 3. Configure AWS credentials
+
+Create a `.env` file or export directly:
 
 ```bash
 export AWS_ACCESS_KEY_ID=your_key
@@ -75,17 +76,15 @@ python -m src.statscan.crawler
 ### Running tests
 
 ```bash
-pytest --cov=src --cov-report=term-missing --cov-fail-under=64
+pytest --cov=src --cov-report=term-missing --cov-fail-under=70
 ```
-
-Coverage threshold: 64% (71 tests, pure functions 100% covered)
 
 ### Architecture
 
 This codebase follows the **Functional Core / Imperative Shell** pattern:
 
-- **Functional core**: Pure functions with no I/O (100% test coverage)
-- **Imperative shell**: I/O operations and orchestration (integration tested with mocks)
+- **Functional core**: Pure functions with all logic, conditionals, edge cases (100% test coverage)
+- **Imperative shell**: I/O orchestration only - HTTP, S3, files, subprocess, print (no tests needed - too thin to have bugs)
 
 Example:
 ```python
@@ -157,6 +156,5 @@ The pipeline executes in sequence:
 
 ### Environment variables
 
-Set via `.env` or inline:
 - `LIMIT` - Number of datasets to process (optional, for testing)
 - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` - AWS credentials
