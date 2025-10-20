@@ -6,17 +6,17 @@ StatsCan and IRCC data warehouse with LibreChat + FastMCP for natural language q
 
 ```
 src/
-  pipeline/          # Data ingestion pipeline
-    discover.py      # Discover StatsCan datasets
-    ingest_all.py    # Download and convert datasets
-    upload_to_s3.py  # Upload to S3
-    regenerate_catalog.py  # Update catalog availability
-    update_crawler.py      # Update Glue crawler
-    utils.py         # S3 utilities
+  statscan/         # StatsCan data pipeline
+    discover.py     # Discover datasets via API
+    ingest.py       # Download and convert to parquet
+    upload.py       # Upload to S3
+    catalog.py      # Update catalog availability
+    crawler.py      # Update Glue crawler
+    utils.py        # S3 utilities
   mcp/              # MCP server for Athena
     athena_mcp_server.py
-deploy/             # Deployment configs (Docker, LibreChat)
-tests/              # Test suite (69% coverage)
+docker/             # Docker deployment (Dockerfile, docker-compose.yml)
+tests/              # Test suite (FC/IS architecture)
 hooks/              # Git hooks (pre-push)
 ```
 
@@ -57,19 +57,19 @@ All pipeline scripts are Python modules:
 
 ```bash
 # Discover datasets
-python -m src.pipeline.discover
+python -m src.statscan.discover
 
 # Ingest datasets (optional LIMIT env var)
-LIMIT=5 python -m src.pipeline.ingest_all
+LIMIT=5 python -m src.statscan.ingest
 
 # Upload to S3
-python -m src.pipeline.upload_to_s3
+python -m src.statscan.upload
 
 # Update catalog
-python -m src.pipeline.regenerate_catalog
+python -m src.statscan.catalog
 
 # Update Glue crawler
-python -m src.pipeline.update_crawler
+python -m src.statscan.crawler
 ```
 
 ### Running tests
@@ -112,15 +112,29 @@ The pre-push hook automatically runs tests before every push. To bypass (use spa
 git push --no-verify
 ```
 
-## Workflows
+## Docker Deployment
 
-### Ingestion
+### Run full pipeline
 
-Run manually via GitHub Actions:
-- Go to Actions → "Ingest StatsCan Data" → Run workflow
-- Optional: Set LIMIT to test with small dataset
+The entire pipeline runs in Docker with orchestrated steps:
 
-### CI/CD
+```bash
+# Test with limited datasets
+LIMIT=5 docker compose -f docker/docker-compose.yml up
 
-- **Local**: Pre-push hook runs tests before push
-- **GitHub**: PR checks run full test suite (backup validation)
+# Production run (all datasets)
+docker compose -f docker/docker-compose.yml up
+```
+
+The pipeline executes in sequence:
+1. `discover` - Fetch catalog from StatsCan API
+2. `ingest` - Download and convert CSVs to parquet
+3. `upload` - Upload to S3
+4. `catalog` - Update catalog availability
+5. `crawler` - Sync Glue crawler with S3
+
+### Environment variables
+
+Set via `.env` or inline:
+- `LIMIT` - Number of datasets to process (optional, for testing)
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` - AWS credentials
