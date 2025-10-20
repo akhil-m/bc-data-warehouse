@@ -180,12 +180,26 @@ def convert_csv_to_parquet(csv_path, output_path):
 
     Returns:
         None (writes file to disk)
+
+    Raises:
+        subprocess.TimeoutExpired: If conversion takes longer than 600 seconds
+        subprocess.CalledProcessError: If conversion fails
     """
     # Core: Generate conversion script
     script = generate_conversion_script(csv_path, output_path)
 
-    # I/O: Run in subprocess for memory isolation
-    subprocess.run([sys.executable, '-c', script], check=True, capture_output=True)
+    # I/O: Run in subprocess for memory isolation (10 minute timeout)
+    result = subprocess.run(
+        [sys.executable, '-c', script],
+        check=True,
+        capture_output=True,
+        timeout=600,
+        text=True
+    )
+
+    # Log stderr if present (warnings, progress messages)
+    if result.stderr:
+        print(f"[Conversion stderr]: {result.stderr.strip()}")
 
 
 # === I/O Layer ===
@@ -296,6 +310,18 @@ def process_dataset(product_id, title, state_lock, shared_state):
             })
 
         return size_mb
+    except subprocess.TimeoutExpired as e:
+        # Subprocess conversion timeout
+        display_title = format_display_title(product_id, title)
+        print(f"{display_title} - Error: Conversion timeout (>600s)")
+        return None
+    except subprocess.CalledProcessError as e:
+        # Subprocess conversion failed
+        display_title = format_display_title(product_id, title)
+        stderr_preview = e.stderr[:200] if e.stderr else "No stderr"
+        print(f"{display_title} - Error: Conversion failed")
+        print(f"  stderr: {stderr_preview}")
+        return None
     except Exception as e:
         # Core: Format display strings
         display_title = format_display_title(product_id, title)
