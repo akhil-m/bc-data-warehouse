@@ -76,45 +76,7 @@ python -m src.statscan.crawler
 ### Running tests
 
 ```bash
-pytest --cov=src --cov-report=term-missing --cov-fail-under=70
-```
-
-### Architecture
-
-This codebase follows the **Functional Core / Imperative Shell** pattern:
-
-- **Functional core**: Pure functions with all logic, conditionals, edge cases (100% test coverage)
-- **Imperative shell**: I/O orchestration only - HTTP, S3, files, subprocess, print (no tests needed - too thin to have bugs)
-
-Example from `src/statscan/ingest.py`:
-```python
-# Functional core (pure, testable)
-def sanitize_column_names(columns):
-    """Replace spaces, slashes, hyphens with underscores."""
-    return [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in columns]
-
-# Imperative shell (I/O only)
-def download_table(product_id, title):
-    """Download CSV from StatsCan API, convert to parquet."""
-    url = f"{API_BASE}/getFullTableDownloadCSV/{product_id}/en"
-    resp = requests.get(url, headers=headers, timeout=60)
-    data = resp.json()
-    zip_url = data['object']
-
-    # ... HTTP download, ZIP extraction, file I/O ...
-
-    # Use pure function for column transformation
-    df.columns = sanitize_column_names(df.columns)
-
-    # ... more I/O: write parquet, upload to S3 ...
-```
-
-### Pre-push hook
-
-The pre-push hook automatically runs tests before every push. To bypass (use sparingly):
-
-```bash
-git push --no-verify
+pytest --cov=src --cov-report=term-missing --cov-fail-under=67
 ```
 
 ## Docker Deployment

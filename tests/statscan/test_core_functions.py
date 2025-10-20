@@ -58,85 +58,298 @@ class TestCreateFolderName:
         assert result == '999-pre-tax-income'
 
 
-class TestGenerateConversionScript:
-    """Test subprocess script generation (pure function)."""
+class TestGetStatsCanNullValues:
+    """Test StatsCan null values list."""
 
-    def test_generates_valid_python_script(self):
-        """Test that generated script is valid Python."""
-        script = ingest.generate_conversion_script('/tmp/input.csv', '/tmp/output.parquet')
+    def test_returns_list(self):
+        """Test that function returns a list."""
+        result = ingest.get_statscan_null_values()
+        assert isinstance(result, list)
 
-        # Should contain necessary imports
-        assert 'import pandas as pd' in script
-        assert 'import pyarrow.csv as pa_csv' in script
-        assert 'import pyarrow.parquet as pq' in script
+    def test_contains_empty_string(self):
+        """Test that empty string is in null values."""
+        result = ingest.get_statscan_null_values()
+        assert '' in result
 
-        # Should contain file paths
-        assert '/tmp/input.csv' in script
-        assert '/tmp/output.parquet' in script
+    def test_contains_dot_symbols(self):
+        """Test that dot symbols are included."""
+        result = ingest.get_statscan_null_values()
+        assert '.' in result
+        assert '..' in result
+        assert '...' in result
 
-        # Should contain sanitization logic (check the full chain)
-        assert ".replace(' ', '_').replace('/', '_').replace('-', '_')" in script
+    def test_contains_suppression_symbols(self):
+        """Test that suppression symbols are included."""
+        result = ingest.get_statscan_null_values()
+        assert 'x' in result
+        assert 'X' in result
 
-        # Should contain string type forcing logic
-        assert 'pa.string()' in script
-        assert 'column_types' in script
-        assert 'RecordBatch.from_arrays' in script
+    def test_contains_quality_indicators(self):
+        """Test that quality indicators are included."""
+        result = ingest.get_statscan_null_values()
+        assert 'E' in result  # Use with caution
+        assert 'e' in result
+        assert 'F' in result  # Too unreliable
+        assert 'f' in result
 
-    def test_handles_different_paths(self):
-        """Test script generation with various path formats."""
-        script = ingest.generate_conversion_script(
-            '/data/12100163/file.csv',
-            '/data/12100163/output.parquet'
+    def test_contains_status_symbols(self):
+        """Test that status symbols are included."""
+        result = ingest.get_statscan_null_values()
+        assert 't' in result  # Terminated
+        assert 'T' in result
+        assert 'p' in result  # Preliminary
+        assert 'r' in result  # Revised
+
+    def test_contains_quality_grades(self):
+        """Test that quality grades A-D are included."""
+        result = ingest.get_statscan_null_values()
+        assert 'A' in result
+        assert 'B' in result
+        assert 'C' in result
+        assert 'D' in result
+
+    def test_contains_rounded_to_zero(self):
+        """Test that rounded to zero symbol is included."""
+        result = ingest.get_statscan_null_values()
+        assert '0s' in result
+
+    def test_is_deterministic(self):
+        """Test that function returns same list on multiple calls."""
+        result1 = ingest.get_statscan_null_values()
+        result2 = ingest.get_statscan_null_values()
+        assert result1 == result2
+
+
+class TestCreateStringSchema:
+    """Test PyArrow schema creation."""
+
+    def test_creates_schema_with_string_types(self):
+        """Test that all fields are string type."""
+        import pyarrow as pa
+        columns = ['col1', 'col2', 'col3']
+        result = ingest.create_string_schema(columns)
+
+        assert isinstance(result, pa.Schema)
+        assert len(result) == 3
+        for field in result:
+            assert field.type == pa.string()
+
+    def test_preserves_column_names(self):
+        """Test that column names are preserved."""
+        columns = ['REF_DATE', 'GEO', 'VALUE']
+        result = ingest.create_string_schema(columns)
+
+        assert result.names == columns
+
+    def test_handles_empty_list(self):
+        """Test with empty column list."""
+        result = ingest.create_string_schema([])
+        assert len(result) == 0
+
+    def test_handles_single_column(self):
+        """Test with single column."""
+        import pyarrow as pa
+        result = ingest.create_string_schema(['single'])
+
+        assert len(result) == 1
+        assert result.field(0).name == 'single'
+        assert result.field(0).type == pa.string()
+
+    def test_handles_many_columns(self):
+        """Test with many columns (StatsCan datasets can have 50+)."""
+        columns = [f'col_{i}' for i in range(60)]
+        result = ingest.create_string_schema(columns)
+
+        assert len(result) == 60
+        assert result.names == columns
+
+
+class TestCreateColumnTypeMap:
+    """Test column type mapping creation."""
+
+    def test_creates_dict_with_string_types(self):
+        """Test that function returns dict mapping columns to pa.string()."""
+        import pyarrow as pa
+        columns = ['col1', 'col2', 'col3']
+        result = ingest.create_column_type_map(columns)
+
+        assert isinstance(result, dict)
+        assert len(result) == 3
+        for col in columns:
+            assert col in result
+            assert result[col] == pa.string()
+
+    def test_handles_empty_list(self):
+        """Test with empty column list."""
+        result = ingest.create_column_type_map([])
+        assert result == {}
+
+    def test_handles_single_column(self):
+        """Test with single column."""
+        import pyarrow as pa
+        result = ingest.create_column_type_map(['single'])
+
+        assert result == {'single': pa.string()}
+
+    def test_handles_special_characters_in_names(self):
+        """Test with original column names (before sanitization)."""
+        import pyarrow as pa
+        columns = ['Column Name', 'Date/Time', 'Start-Date']
+        result = ingest.create_column_type_map(columns)
+
+        # Should preserve original names in mapping
+        assert 'Column Name' in result
+        assert 'Date/Time' in result
+        assert 'Start-Date' in result
+        for col in columns:
+            assert result[col] == pa.string()
+
+
+class TestRenameBatchColumns:
+    """Test PyArrow batch column renaming."""
+
+    def test_renames_batch_columns(self):
+        """Test that batch columns are renamed to schema."""
+        import pyarrow as pa
+
+        # Create batch with original names
+        original_schema = pa.schema([
+            pa.field('col1', pa.string()),
+            pa.field('col2', pa.string())
+        ])
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array(['a', 'b']), pa.array(['c', 'd'])],
+            schema=original_schema
         )
 
-        assert '/data/12100163/file.csv' in script
-        assert '/data/12100163/output.parquet' in script
+        # Create target schema with renamed columns
+        target_schema = pa.schema([
+            pa.field('renamed1', pa.string()),
+            pa.field('renamed2', pa.string())
+        ])
 
-    def test_script_contains_all_conversion_steps(self):
-        """Test that script includes all necessary streaming steps."""
-        script = ingest.generate_conversion_script('input.csv', 'output.parquet')
+        result = ingest.rename_batch_columns(batch, target_schema)
 
-        # Should read header with pandas
-        assert 'pd.read_csv' in script
-        assert 'nrows=0' in script
+        assert result.schema.names == ['renamed1', 'renamed2']
+        assert result.num_columns == 2
+        assert result.num_rows == 2
 
-        # Should have all required streaming steps
-        assert 'pa_csv.open_csv' in script
-        assert 'pq.ParquetWriter' in script
-        assert 'writer.write_batch' in script
+    def test_preserves_data(self):
+        """Test that data is preserved during renaming."""
+        import pyarrow as pa
 
-        # Should force string types via column_types
-        assert 'pa.string()' in script
-        assert 'column_types' in script
-        assert 'RecordBatch.from_arrays' in script
-
-    def test_sanitization_matches_sanitize_column_names(self):
-        """Test that embedded sanitization logic matches sanitize_column_names() function."""
-        script = ingest.generate_conversion_script('input.csv', 'output.parquet')
-
-        # The sanitization logic should be the same as in sanitize_column_names()
-        # This ensures DRY principle - if we change sanitize_column_names(),
-        # we should update the subprocess script too
-        expected_logic = "[col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in original_columns]"
-        assert expected_logic in script
-
-    def test_script_uses_pathlib_path_objects(self):
-        """Test that Path objects are converted to strings in script."""
-        script = ingest.generate_conversion_script(
-            Path('/tmp/input.csv'),
-            Path('/tmp/output.parquet')
+        original_schema = pa.schema([pa.field('old', pa.string())])
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array(['value1', 'value2', 'value3'])],
+            schema=original_schema
         )
 
-        # Should handle Path objects (converted to strings via f-string)
-        assert 'input.csv' in script
-        assert 'output.parquet' in script
+        target_schema = pa.schema([pa.field('new', pa.string())])
+        result = ingest.rename_batch_columns(batch, target_schema)
 
-    def test_script_is_deterministic(self):
-        """Test that same inputs produce same script."""
-        script1 = ingest.generate_conversion_script('input.csv', 'output.parquet')
-        script2 = ingest.generate_conversion_script('input.csv', 'output.parquet')
+        # Data should be unchanged
+        assert result.column(0).to_pylist() == ['value1', 'value2', 'value3']
 
-        assert script1 == script2
+    def test_handles_empty_batch(self):
+        """Test with empty batch (0 rows)."""
+        import pyarrow as pa
+
+        original_schema = pa.schema([pa.field('col', pa.string())])
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array([], type=pa.string())],
+            schema=original_schema
+        )
+
+        target_schema = pa.schema([pa.field('renamed', pa.string())])
+        result = ingest.rename_batch_columns(batch, target_schema)
+
+        assert result.num_rows == 0
+        assert result.schema.names == ['renamed']
+
+    def test_handles_many_columns(self):
+        """Test with many columns."""
+        import pyarrow as pa
+
+        num_cols = 50
+        original_schema = pa.schema([
+            pa.field(f'col_{i}', pa.string()) for i in range(num_cols)
+        ])
+        arrays = [pa.array(['val']) for _ in range(num_cols)]
+        batch = pa.RecordBatch.from_arrays(arrays, schema=original_schema)
+
+        target_schema = pa.schema([
+            pa.field(f'renamed_{i}', pa.string()) for i in range(num_cols)
+        ])
+        result = ingest.rename_batch_columns(batch, target_schema)
+
+        assert result.num_columns == num_cols
+        assert result.schema.names == [f'renamed_{i}' for i in range(num_cols)]
+
+
+class TestFindCsvInZip:
+    """Test CSV file finding in ZIP archives."""
+
+    def test_finds_csv_file(self):
+        """Test that CSV file is found in namelist."""
+        namelist = ['data.csv', 'readme.txt']
+        result = ingest.find_csv_in_zip(namelist)
+
+        assert result == 'data.csv'
+
+    def test_finds_first_csv_when_multiple(self):
+        """Test that first CSV is returned when multiple exist."""
+        namelist = ['file1.csv', 'file2.csv', 'file3.csv']
+        result = ingest.find_csv_in_zip(namelist)
+
+        assert result == 'file1.csv'
+
+    def test_case_insensitive_extension(self):
+        """Test that .CSV (uppercase) is recognized."""
+        namelist = ['DATA.CSV', 'readme.txt']
+        result = ingest.find_csv_in_zip(namelist)
+
+        assert result == 'DATA.CSV'
+
+    def test_mixed_case_extension(self):
+        """Test mixed case extension."""
+        namelist = ['data.CsV', 'other.txt']
+        result = ingest.find_csv_in_zip(namelist)
+
+        assert result == 'data.CsV'
+
+    def test_raises_on_empty_namelist(self):
+        """Test that ValueError is raised for empty ZIP."""
+        import pytest
+        with pytest.raises(ValueError, match="ZIP archive is empty"):
+            ingest.find_csv_in_zip([])
+
+    def test_raises_when_no_csv(self):
+        """Test that ValueError is raised when no CSV found."""
+        import pytest
+        namelist = ['file.txt', 'data.json', 'readme.md']
+        with pytest.raises(ValueError, match="No CSV file found"):
+            ingest.find_csv_in_zip(namelist)
+
+    def test_error_message_includes_filenames(self):
+        """Test that error message lists files when no CSV found."""
+        import pytest
+        namelist = ['file.txt', 'data.json']
+        with pytest.raises(ValueError, match="file.txt"):
+            ingest.find_csv_in_zip(namelist)
+
+    def test_ignores_csv_in_subdirectory(self):
+        """Test CSV files in subdirectories are still found."""
+        namelist = ['subdir/data.csv', 'readme.txt']
+        result = ingest.find_csv_in_zip(namelist)
+
+        assert result == 'subdir/data.csv'
+
+    def test_finds_csv_with_path_separator(self):
+        """Test CSV with full path."""
+        namelist = ['archive/datasets/12100163.csv']
+        result = ingest.find_csv_in_zip(namelist)
+
+        assert result == 'archive/datasets/12100163.csv'
 
 
 class TestFilterCatalog:

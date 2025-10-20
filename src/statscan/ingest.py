@@ -79,12 +79,11 @@ def filter_catalog(catalog_df, existing_ids, skip_invisible=True, limit=None):
     return filtered
 
 
-def generate_conversion_script(csv_path, output_path):
-    """Generate Python script for streaming CSV to parquet conversion.
+def _do_csv_conversion(csv_path, output_path):
+    """Imperative shell for CSV to parquet conversion.
 
-    This is a pure function that returns the subprocess script content.
-    The script processes CSV in batches to avoid loading entire file into memory,
-    preventing OOM kills on large files (150MB+).
+    This runs in a subprocess for memory isolation. After conversion completes,
+    the subprocess exits and all memory is released back to the OS.
 
     ALL COLUMNS FORCED TO STRING TYPE:
     - Disables PyArrow type inference via column_types parameter
@@ -100,59 +99,36 @@ def generate_conversion_script(csv_path, output_path):
         output_path: Path to output parquet file (str or Path)
 
     Returns:
-        String containing Python script to execute in subprocess
+        None (writes file to disk)
     """
-    return f"""
-import pandas as pd
-import pyarrow as pa
-import pyarrow.csv as pa_csv
-import pyarrow.parquet as pq
+    import pyarrow.csv as pa_csv
+    import pyarrow.parquet as pq
 
-# Get column names from CSV header (lightweight, doesn't load data)
-df_header = pd.read_csv('{csv_path}', nrows=0)
-original_columns = df_header.columns.tolist()
+    # I/O: Get column names from CSV header (lightweight, doesn't load data)
+    df_header = pd.read_csv(csv_path, nrows=0)
+    original_columns = df_header.columns.tolist()
 
-# Sanitize column names for parquet compatibility
-sanitized_columns = [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in original_columns]
+    # Core: Use pure functions for all logic
+    sanitized_columns = sanitize_column_names(original_columns)
+    string_schema = create_string_schema(sanitized_columns)
+    null_values = get_statscan_null_values()
+    column_types = create_column_type_map(original_columns)
 
-# Create schema with all string types
-string_schema = pa.schema([
-    pa.field(name, pa.string())
-    for name in sanitized_columns
-])
+    # Configure CSV parsing
+    convert_options = pa_csv.ConvertOptions(
+        null_values=null_values,
+        strings_can_be_null=True,
+        column_types=column_types
+    )
 
-# Force all columns to string type (prevents type inference errors)
-column_types = {{col: pa.string() for col in original_columns}}
-
-# Configure CSV parsing for StatsCan standard table symbols
-# Official list: https://www.statcan.gc.ca/en/concepts/definitions/guide-symbol
-convert_options = pa_csv.ConvertOptions(
-    null_values=[
-        '',              # Empty string
-        '.', '..', '...', # Not available/applicable
-        'x', 'X',        # Suppressed
-        'E', 'e',        # Use with caution
-        'F', 'f',        # Too unreliable
-        't', 'T',        # Terminated
-        'A', 'B', 'C', 'D', # Quality grades
-        'p', 'r',        # Preliminary/revised
-        '0s'             # Rounded to zero
-    ],
-    strings_can_be_null=True,
-    column_types=column_types  # Force all columns to string!
-)
-
-# Stream CSV to parquet
-with pa_csv.open_csv('{csv_path}', convert_options=convert_options) as reader:
-    with pq.ParquetWriter('{output_path}', string_schema) as writer:
-        for batch in reader:
-            # Rename columns to sanitized versions
-            renamed_batch = pa.RecordBatch.from_arrays(
-                [batch.column(i) for i in range(batch.num_columns)],
-                schema=string_schema
-            )
-            writer.write_batch(renamed_batch)
-"""
+    # I/O: Stream CSV to parquet
+    with pa_csv.open_csv(csv_path, convert_options=convert_options) as reader:
+        with pq.ParquetWriter(output_path, string_schema) as writer:
+            for batch in reader:
+                # Core: Rename columns using pure function
+                renamed_batch = rename_batch_columns(batch, string_schema)
+                # I/O: Write batch
+                writer.write_batch(renamed_batch)
 
 
 def format_display_title(product_id, title, max_len=50):
@@ -213,6 +189,96 @@ def should_print_progress(current_pct, last_printed_pct, interval=10):
     return current_pct >= last_printed_pct + interval
 
 
+def get_statscan_null_values():
+    """Get StatsCan standard table symbols to treat as nulls.
+
+    Official list: https://www.statcan.gc.ca/en/concepts/definitions/guide-symbol
+
+    Returns:
+        List of strings to treat as null values in CSV parsing
+    """
+    return [
+        '',              # Empty string
+        '.', '..', '...', # Not available/applicable
+        'x', 'X',        # Suppressed
+        'E', 'e',        # Use with caution
+        'F', 'f',        # Too unreliable
+        't', 'T',        # Terminated
+        'A', 'B', 'C', 'D', # Quality grades
+        'p', 'r',        # Preliminary/revised
+        '0s'             # Rounded to zero
+    ]
+
+
+def create_string_schema(column_names):
+    """Create PyArrow schema with all columns as string type.
+
+    Args:
+        column_names: List of column names (already sanitized)
+
+    Returns:
+        PyArrow schema with all string fields
+    """
+    import pyarrow as pa
+    return pa.schema([
+        pa.field(name, pa.string())
+        for name in column_names
+    ])
+
+
+def create_column_type_map(column_names):
+    """Create column-to-type mapping for PyArrow CSV parsing.
+
+    Args:
+        column_names: List of original column names (before sanitization)
+
+    Returns:
+        Dict mapping each column name to pa.string() type
+    """
+    import pyarrow as pa
+    return {col: pa.string() for col in column_names}
+
+
+def rename_batch_columns(batch, schema):
+    """Rename columns in a PyArrow RecordBatch.
+
+    Args:
+        batch: PyArrow RecordBatch with original column names
+        schema: Target PyArrow schema with sanitized column names
+
+    Returns:
+        PyArrow RecordBatch with renamed columns
+    """
+    import pyarrow as pa
+    return pa.RecordBatch.from_arrays(
+        [batch.column(i) for i in range(batch.num_columns)],
+        schema=schema
+    )
+
+
+def find_csv_in_zip(namelist):
+    """Find CSV file in ZIP archive namelist.
+
+    Args:
+        namelist: List of filenames from ZipFile.namelist()
+
+    Returns:
+        First CSV filename found
+
+    Raises:
+        ValueError: If no CSV file found or namelist is empty
+    """
+    if not namelist:
+        raise ValueError("ZIP archive is empty")
+
+    csv_files = [name for name in namelist if name.lower().endswith('.csv')]
+
+    if not csv_files:
+        raise ValueError(f"No CSV file found in ZIP. Files: {namelist}")
+
+    return csv_files[0]
+
+
 def convert_csv_to_parquet(csv_path, output_path):
     """Convert CSV to parquet using PyArrow in a subprocess for memory isolation.
 
@@ -231,10 +297,8 @@ def convert_csv_to_parquet(csv_path, output_path):
         subprocess.TimeoutExpired: If conversion takes longer than 600 seconds
         subprocess.CalledProcessError: If conversion fails
     """
-    # Core: Generate conversion script
-    script = generate_conversion_script(csv_path, output_path)
-
-    # I/O: Run in subprocess for memory isolation (10 minute timeout)
+    # I/O: Run conversion in subprocess for memory isolation (10 minute timeout)
+    script = f"from src.statscan.ingest import _do_csv_conversion; _do_csv_conversion('{csv_path}', '{output_path}')"
     subprocess.run(
         [sys.executable, '-c', script],
         check=True,
@@ -300,7 +364,8 @@ def download_table(product_id, title):
     # Extract CSV to temp directory
     with tempfile.TemporaryDirectory() as tmp_dir:
         with zipfile.ZipFile(zip_path) as z:
-            csv_name = z.namelist()[0]
+            # Core: Find CSV file in ZIP (robust, handles edge cases)
+            csv_name = find_csv_in_zip(z.namelist())
             csv_path = z.extract(csv_name, tmp_dir)
 
         # Convert CSV to parquet (memory efficient with PyArrow)
