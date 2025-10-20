@@ -15,7 +15,7 @@ python -m src.statscan.upload
 echo "[$(date)] Step 4/5: Updating catalog..."
 python -m src.statscan.catalog
 
-echo "[$(date)] Step 5/5: Updating Glue crawler..."
+echo "[$(date)] Step 5/5: Updating crawler..."
 python -m src.statscan.crawler
 
 echo "[$(date)] ✓ Pipeline complete"

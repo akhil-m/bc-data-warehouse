@@ -80,10 +80,14 @@ def filter_catalog(catalog_df, existing_ids, skip_invisible=True, limit=None):
 
 
 def generate_conversion_script(csv_path, output_path):
-    """Generate Python script for CSV to parquet conversion.
+    """Generate Python script for streaming CSV to parquet conversion.
 
     This is a pure function that returns the subprocess script content.
-    The script uses the same sanitization logic as sanitize_column_names().
+    The script processes CSV in batches to avoid loading entire file into memory,
+    preventing OOM kills on large files (150MB+).
+
+    Handles StatsCan's null conventions: empty strings, '..' (not available),
+    '...' (not applicable), 'x' (suppressed), 'F' (unreliable).
 
     Args:
         csv_path: Path to input CSV file (str or Path)
@@ -93,19 +97,43 @@ def generate_conversion_script(csv_path, output_path):
         String containing Python script to execute in subprocess
     """
     return f"""
+import pyarrow as pa
 import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
 
-# Read CSV
-table = pa_csv.read_csv('{csv_path}')
+# Configure CSV parsing for StatsCan null conventions
+convert_options = pa_csv.ConvertOptions(
+    null_values=['', '..', '...', 'x', 'F'],
+    strings_can_be_null=True
+)
 
-# Sanitize column names (same logic as sanitize_column_names())
-columns = table.column_names
-sanitized = [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in columns]
-table = table.rename_columns(sanitized)
+# Open CSV for streaming (processes in batches of ~64K rows)
+with pa_csv.open_csv('{csv_path}', convert_options=convert_options) as reader:
+    writer = None
+    sanitized = None
 
-# Write parquet
-pq.write_table(table, '{output_path}')
+    for batch in reader:
+        if writer is None:
+            # Sanitize column names on first batch (same logic as sanitize_column_names())
+            columns = batch.schema.names
+            sanitized = [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in columns]
+
+            # Create schema with sanitized names
+            schema = pa.schema([
+                pa.field(sanitized[i], batch.schema.field(i).type)
+                for i in range(len(batch.schema))
+            ])
+
+            # Initialize parquet writer
+            writer = pq.ParquetWriter('{output_path}', schema)
+
+        # Rename columns and write batch
+        batch = batch.rename_columns(sanitized)
+        writer.write_batch(batch)
+
+    # Close writer if any data was processed
+    if writer:
+        writer.close()
 """
 
 
@@ -189,17 +217,11 @@ def convert_csv_to_parquet(csv_path, output_path):
     script = generate_conversion_script(csv_path, output_path)
 
     # I/O: Run in subprocess for memory isolation (10 minute timeout)
-    result = subprocess.run(
+    subprocess.run(
         [sys.executable, '-c', script],
         check=True,
-        capture_output=True,
-        timeout=600,
-        text=True
+        timeout=600
     )
-
-    # Log stderr if present (warnings, progress messages)
-    if result.stderr:
-        print(f"[Conversion stderr]: {result.stderr.strip()}")
 
 
 # === I/O Layer ===
@@ -318,9 +340,7 @@ def process_dataset(product_id, title, state_lock, shared_state):
     except subprocess.CalledProcessError as e:
         # Subprocess conversion failed
         display_title = format_display_title(product_id, title)
-        stderr_preview = e.stderr[:200] if e.stderr else "No stderr"
-        print(f"{display_title} - Error: Conversion failed")
-        print(f"  stderr: {stderr_preview}")
+        print(f"{display_title} - Error: Conversion failed (returncode {e.returncode})")
         return None
     except Exception as e:
         # Core: Format display strings

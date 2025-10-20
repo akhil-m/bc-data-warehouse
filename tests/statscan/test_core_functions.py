@@ -87,14 +87,15 @@ class TestGenerateConversionScript:
         assert '/data/12100163/output.parquet' in script
 
     def test_script_contains_all_conversion_steps(self):
-        """Test that script includes all necessary steps."""
+        """Test that script includes all necessary streaming steps."""
         script = ingest.generate_conversion_script('input.csv', 'output.parquet')
 
-        # Should have all required steps in order
-        assert 'pa_csv.read_csv' in script
-        assert 'table.column_names' in script
-        assert 'table.rename_columns' in script
-        assert 'pq.write_table' in script
+        # Should have all required streaming steps
+        assert 'pa_csv.open_csv' in script
+        assert 'batch.schema.names' in script
+        assert 'batch.rename_columns' in script
+        assert 'pq.ParquetWriter' in script
+        assert 'writer.write_batch' in script
 
     def test_sanitization_matches_sanitize_column_names(self):
         """Test that embedded sanitization logic matches sanitize_column_names() function."""

@@ -311,7 +311,8 @@ class TestConvertCsvToParquet:
 
             # Verify subprocess parameters
             assert call_args[1]['check'] is True
-            assert call_args[1]['capture_output'] is True
+            assert call_args[1]['timeout'] == 600
+            assert 'capture_output' not in call_args[1]  # No output buffering
             assert call_args[0][0][0] == sys.executable
             assert call_args[0][0][1] == '-c'
 

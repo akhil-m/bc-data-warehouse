@@ -86,7 +86,7 @@ def download_table(product_id, title):
 **Core Logic Functions:**
 1. **discover.py** - `extract_catalog_metadata(cubes)` - API JSON → DataFrame transformation (9 tests)
 2. **catalog.py** - `enhance_catalog(catalog_df, existing_ids)` - Availability flag logic (5 tests)
-3. **crawler.py** - `create_s3_targets()`, `create_crawler_update_params()` - AWS config generation (2 tests)
+3. **crawler.py** - `extract_product_id_from_table_name()`, `find_new_folders()`, `create_s3_targets()`, `create_crawler_update_params()` - Incremental crawler logic (15 tests)
 4. **ingest.py**:
    - `sanitize_column_names()` - Column name cleaning (6 tests)
    - `create_folder_name()` - Path generation (5 tests)
@@ -104,7 +104,7 @@ def download_table(product_id, title):
    - `should_print_progress()` - Progress interval logic (8 tests)
 
 ### Test Suite Status:
-- **118 tests** (up from 84, +34 new tests)
+- **132 tests** (up from 84, +48 new tests)
 - **~67% overall coverage** (66.91% actual, 100% Functional Core, 0% Imperative Shell)
 - **100% pure function coverage** (no mocks needed for FC)
 - **All tests passing** ✅
@@ -129,7 +129,7 @@ All LOGIC extracted and tested. All UNTESTED code is pure I/O.
 |--------|----------------|------------------|--------|
 | discover.py | `extract_catalog_metadata()` | `get_all_cubes()`, `main()` | ✅ Clean |
 | catalog.py | `enhance_catalog()` | `main()` | ✅ Clean |
-| crawler.py | `create_s3_targets()`, `create_crawler_update_params()` | `main()` | ✅ Clean |
+| crawler.py | `extract_product_id_from_table_name()`, `find_new_folders()`, `create_s3_targets()`, `create_crawler_update_params()` | `main()` | ✅ Clean (incremental) |
 | ingest.py | `sanitize_column_names()`, `create_folder_name()`, `filter_catalog()`, `generate_conversion_script()`, `format_display_title()`, `format_error_message()`, `calculate_download_progress()`, `should_print_progress()` | `convert_csv_to_parquet()`, `download_table()`, `process_dataset()`, `main()` | ✅ Clean |
 | upload.py | `validate_manifest_data()`, `should_skip_file()` | `upload_datasets()` | ✅ Clean |
 | utils.py | `extract_product_id_from_folder()` | `get_existing_dataset_ids()`, `get_existing_dataset_folders()` | ✅ Clean |
@@ -152,8 +152,11 @@ All LOGIC extracted and tested. All UNTESTED code is pure I/O.
 - Each conversion runs in isolated subprocess (memory released on exit)
 
 ### Phase 3: Warehouse ✓
-- **S3**: `s3://build-cananda-dw/statscan/data/` (~395 datasets, ~3GB)
-- **Glue Crawler**: Synced with S3 folders via `crawler.py` (individual S3 targets to prevent table merging)
+- **S3**: `s3://build-cananda-dw/statscan/data/` (~895 datasets, ~3GB)
+- **Glue Crawler**: Incremental crawling via `crawler.py` (only crawls new folders + catalog)
+  - Compares S3 folders vs existing Glue tables
+  - Only adds new datasets to crawler targets (efficient for initial bulk ingestion)
+  - Always crawls catalog folder (updates availability flags)
 - **Catalog**: `s3://build-cananda-dw/statscan/catalog/catalog.parquet`
   - Columns: productId, title, subject, frequency, releaseTime, dimensions, nbDatapoints, available
   - Updated by `catalog.py` based on S3 contents
