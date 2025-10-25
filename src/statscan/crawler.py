@@ -98,7 +98,7 @@ def create_crawler_update_params(targets, crawler_name, role, database_name):
 
 def main():
     """Main crawler update orchestration."""
-    CRAWLER_NAME = "statscan"
+    CRAWLER_NAME = "statscan-v3"
     S3_DATA_BUCKET = "s3://build-cananda-dw/statscan/data/"
     S3_CATALOG_BUCKET = "s3://build-cananda-dw/statscan/catalog/"
 

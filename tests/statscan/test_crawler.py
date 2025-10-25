@@ -225,7 +225,7 @@ class TestMainIntegration:
         mock_glue.update_crawler.assert_called_once()
         call_args = mock_glue.update_crawler.call_args[1]
 
-        assert call_args['Name'] == 'statscan'
+        assert call_args['Name'] == 'statscan-v3'
         assert call_args['DatabaseName'] == 'statscan'
         assert call_args['Role'] == 'service-role/AWSGlueServiceRole-statscan'
 
@@ -237,7 +237,7 @@ class TestMainIntegration:
         assert targets[2]['Path'] == 's3://build-cananda-dw/statscan/catalog/'
 
         # Verify crawler was started after update
-        mock_glue.start_crawler.assert_called_once_with(Name='statscan')
+        mock_glue.start_crawler.assert_called_once_with(Name='statscan-v3')
 
     @patch('boto3.client')
     @patch('src.statscan.utils.get_existing_dataset_folders')
@@ -271,4 +271,4 @@ class TestMainIntegration:
         assert call_args['Targets']['S3Targets'][0]['Path'] == 's3://build-cananda-dw/statscan/catalog/'
 
         # Verify crawler was still started (to update catalog)
-        mock_glue.start_crawler.assert_called_once_with(Name='statscan')
+        mock_glue.start_crawler.assert_called_once_with(Name='statscan-v3')

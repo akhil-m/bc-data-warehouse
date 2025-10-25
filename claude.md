@@ -152,16 +152,21 @@ All LOGIC extracted and tested. All UNTESTED code is pure I/O.
 - Each conversion runs in isolated subprocess (memory released on exit)
 
 ### Phase 3: Warehouse ✓
-- **S3**: `s3://build-cananda-dw/statscan/data/` (~895 datasets, ~3GB)
-- **Glue Crawler**: Incremental crawling via `crawler.py` (only crawls new folders + catalog)
+- **S3**: `s3://build-cananda-dw/statscan/data/` (3928 datasets, ~10GB)
+- **Glue Crawler**: Incremental crawling via `crawler.py` using `statscan-v3` crawler
   - Compares S3 folders vs existing Glue tables
-  - Only adds new datasets to crawler targets (efficient for initial bulk ingestion)
+  - Only adds NEW datasets to crawler targets (incremental approach)
   - Always crawls catalog folder (updates availability flags)
+  - **IMPORTANT**: AWS Glue has undocumented ~2k target limit per crawler
+    - Crawlers with ≥2k targets enter broken "quantum superposition" state (RUNNING/0ms forever)
+    - Keep incremental batches under 500 targets to avoid this bug
+    - Initial bulk ingestion used 4 temporary crawlers (v3-v6) with 500 targets each
 - **Catalog**: `s3://build-cananda-dw/statscan/catalog/catalog.parquet`
   - Columns: productId, title, subject, frequency, releaseTime, dimensions, nbDatapoints, available
   - Updated by `catalog.py` based on S3 contents
   - Processed in productId order (starts with small Bank of Canada/government datasets, larger trade/labor/immigration datasets come later)
 - **Athena**: Presto SQL, database `statscan` (us-east-2), tables require double quotes
+- **Status**: 3929 tables cataloged (3928 datasets + 1 catalog), all queryable via Athena
 
 ### Phase 4: Chat ✓
 **Coolify Deployment:**
@@ -177,7 +182,7 @@ All LOGIC extracted and tested. All UNTESTED code is pure I/O.
 - Pre-push hook runs tests (`.git/hooks/pre-push`)
 - ~67% reflects FC/IS: 100% core logic + 0% I/O shell
 
-**Status:** ~395 datasets ingested (~3GB), all parquet files follow consistent StatsCan schema (REF_DATE, GEO, UOM, SCALAR_FACTOR, VALUE + dimensions)
+**Status:** 3928 datasets ingested (~10GB), all parquet files follow StatsCan schema (REF_DATE, GEO, UOM, SCALAR_FACTOR, VALUE + dataset-specific dimension columns)
 
 ### Phase 6: Docker Deployment ✓
 **Structure:**
@@ -253,6 +258,6 @@ When users ask questions:
 4. Explain results in context
 
 Data Coverage:
-- StatsCan: 268 datasets available (immigration outcomes, economic indicators, demographics)
+- StatsCan: 3928 datasets available (complete StatsCan warehouse: trade, labor, immigration, economic indicators, demographics, health, government finance, etc.)
 - IRCC Express Entry data: NOT available in StatsCan (managed by IRCC separately)
 ```
