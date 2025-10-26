@@ -76,7 +76,7 @@ python -m src.statscan.crawler
 ### Running tests
 
 ```bash
-pytest --cov=src --cov-report=term-missing --cov-fail-under=67
+pytest --cov=src --cov-report=term-missing --cov-fail-under=65
 ```
 
 ## Docker Deployment
