@@ -503,25 +503,50 @@ def main():
     # Start memory tracking
     tracemalloc.start()
 
-    # I/O: Load catalog
-    catalog = pd.read_parquet('catalog.parquet')
+    # I/O: Check if catalog_filtered.parquet exists (from compare.py)
+    if os.path.exists('catalog_filtered.parquet'):
+        # Update workflow: use pre-filtered list (new + updates)
+        print("Using catalog_filtered.parquet (update detection enabled)")
+        filtered_catalog = pd.read_parquet('catalog_filtered.parquet')
 
-    # I/O: Get existing datasets from S3
-    existing = utils.get_existing_dataset_ids('statscan')
-    print(f"Already have {len(existing)} datasets in S3")
+        # Merge with full catalog to get all metadata columns
+        full_catalog = pd.read_parquet('catalog.parquet')
+        catalog_to_process = full_catalog[
+            full_catalog['productId'].isin(filtered_catalog['productId'])
+        ].copy()
 
-    # I/O: Read limit from environment
-    limit = int(os.getenv('LIMIT')) if os.getenv('LIMIT') else None
+        # Add reason column for visibility
+        catalog_to_process = catalog_to_process.merge(
+            filtered_catalog[['productId', 'reason']],
+            on='productId',
+            how='left'
+        )
 
-    # Core: Apply all filtering logic in one place
-    catalog_to_process = filter_catalog(
-        catalog,
-        existing_ids=existing,
-        skip_invisible=True,
-        limit=limit
-    )
+        new_count = (catalog_to_process['reason'] == 'new').sum()
+        update_count = (catalog_to_process['reason'] == 'update_due').sum()
+        print(f"  - {new_count} new datasets")
+        print(f"  - {update_count} updates due")
+    else:
+        # Legacy workflow: filter out existing datasets
+        print("Using legacy filtering (catalog_filtered.parquet not found)")
+        catalog = pd.read_parquet('catalog.parquet')
 
-    print(f"Processing {len(catalog_to_process)} datasets with {NUM_WORKERS} workers")
+        # I/O: Get existing datasets from S3
+        existing = utils.get_existing_dataset_ids('statscan')
+        print(f"Already have {len(existing)} datasets in S3")
+
+        # I/O: Read limit from environment
+        limit = int(os.getenv('LIMIT')) if os.getenv('LIMIT') else None
+
+        # Core: Apply all filtering logic in one place
+        catalog_to_process = filter_catalog(
+            catalog,
+            existing_ids=existing,
+            skip_invisible=True,
+            limit=limit
+        )
+
+    print(f"\nProcessing {len(catalog_to_process)} datasets with {NUM_WORKERS} workers")
     print(f"Target: {MAX_TOTAL_GB} GB total\n")
 
     # Shared state for thread pool
