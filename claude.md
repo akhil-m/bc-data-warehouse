@@ -77,62 +77,18 @@ def download_table(product_id, title):
 
 ---
 
-## ✅ FC/IS Refactoring Complete (2025-10-19)
+## ✅ FC/IS Architecture
 
-**All code now follows strict Functional Core / Imperative Shell pattern.**
+**All code follows strict Functional Core / Imperative Shell pattern.**
 
-### Pure Functions Extracted:
-
-**Core Logic Functions:**
-1. **discover.py** - `extract_catalog_metadata(cubes)` - API JSON → DataFrame transformation (9 tests)
-2. **catalog.py** - `enhance_catalog(catalog_df, existing_ids)` - Availability flag logic (5 tests)
-3. **crawler.py** - `extract_product_id_from_table_name()`, `find_new_folders()`, `create_s3_targets()`, `create_crawler_update_params()` - Incremental crawler logic (15 tests)
-4. **ingest.py**:
-   - `sanitize_column_names()` - Column name cleaning (6 tests)
-   - `create_folder_name()` - Path generation (5 tests)
-   - `filter_catalog()` - Dataset filtering logic (8 tests)
-   - `generate_conversion_script()` - Subprocess script generation (6 tests)
-5. **upload.py** - `validate_manifest_data()` - File validation logic (8 tests)
-6. **utils.py** - `extract_product_id_from_folder()` - ID extraction (7 tests)
-
-**Display & Formatting Functions (Added to achieve clean shell):**
-1. **upload.py** - `should_skip_file(file_path)` - File existence validation (5 tests)
-2. **ingest.py**:
-   - `format_display_title()` - Title truncation for logs (7 tests)
-   - `format_error_message()` - Error message formatting (7 tests)
-   - `calculate_download_progress()` - Progress percentage calc (8 tests)
-   - `should_print_progress()` - Progress interval logic (8 tests)
-
-### Test Suite Status:
-- **132 tests** (up from 84, +48 new tests)
-- **~67% overall coverage** (66.91% actual, 100% Functional Core, 0% Imperative Shell)
-- **100% pure function coverage** (no mocks needed for FC)
-- **All tests passing** ✅
-
-### Why ~67% Coverage is Correct:
+### Why ~67% Coverage is Expected:
 
 This is the natural result of FC/IS architecture:
 - **Functional Core**: 100% tested (all logic, edge cases, calculations)
 - **Imperative Shell**: 0% tested (only I/O: HTTP, S3, files, subprocess, print)
-- **Weighted average**: 67% (based on lines of code)
+- **Weighted average**: ~67% (based on lines of code)
 
-Untested code breakdown:
-- `discover.py:40-44, 49-60` - HTTP requests + file I/O
-- `ingest.py:206-271, 351-366` - HTTP, ZIP extraction, file I/O
-- `upload.py:59-99` - S3 upload loop
-
-All LOGIC extracted and tested. All UNTESTED code is pure I/O.
-
-### FC/IS Coverage by Module:
-
-| Module | Functional Core | Imperative Shell | Status |
-|--------|----------------|------------------|--------|
-| discover.py | `extract_catalog_metadata()` | `get_all_cubes()`, `main()` | ✅ Clean |
-| catalog.py | `enhance_catalog()` | `main()` | ✅ Clean |
-| crawler.py | `extract_product_id_from_table_name()`, `find_new_folders()`, `create_s3_targets()`, `create_crawler_update_params()` | `main()` | ✅ Clean (incremental) |
-| ingest.py | `sanitize_column_names()`, `create_folder_name()`, `filter_catalog()`, `generate_conversion_script()`, `format_display_title()`, `format_error_message()`, `calculate_download_progress()`, `should_print_progress()` | `convert_csv_to_parquet()`, `download_table()`, `process_dataset()`, `main()` | ✅ Clean |
-| upload.py | `validate_manifest_data()`, `should_skip_file()` | `upload_datasets()` | ✅ Clean |
-| utils.py | `extract_product_id_from_folder()` | `get_existing_dataset_ids()`, `get_existing_dataset_folders()` | ✅ Clean |
+All LOGIC is extracted to pure functions and tested. All UNTESTED code is pure I/O.
 
 ---
 
@@ -178,11 +134,9 @@ All LOGIC extracted and tested. All UNTESTED code is pure I/O.
 ### Phase 5: Quality & Testing ✓
 **Architecture:** Functional Core / Imperative Shell
 - All logic extracted to pure functions (100% test coverage on core logic)
-- 118 tests, ~67% overall coverage (66.91%, pytest + pytest-cov + pytest-mock)
+- ~67% overall coverage reflects FC/IS: 100% core logic + 0% I/O shell
 - Pre-push hook runs tests (`.git/hooks/pre-push`)
-- ~67% reflects FC/IS: 100% core logic + 0% I/O shell
-
-**Status:** 3928 datasets ingested (~10GB), all parquet files follow StatsCan schema (REF_DATE, GEO, UOM, SCALAR_FACTOR, VALUE + dataset-specific dimension columns)
+- Test tools: pytest + pytest-cov + pytest-mock
 
 ### Phase 6: Docker Deployment ✓
 **Structure:**
@@ -190,7 +144,7 @@ All LOGIC extracted and tested. All UNTESTED code is pure I/O.
 src/statscan/    # discover.py, ingest.py, upload.py, catalog.py, crawler.py
 src/mcp/         # FastMCP Athena server
 docker/          # Dockerfile, docker-compose.yml, run_statscan.sh
-tests/statscan/  # 83 tests
+tests/statscan/  # Full test suite
 ```
 
 **Commands:**

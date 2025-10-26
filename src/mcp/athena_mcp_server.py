@@ -1,10 +1,12 @@
 from fastmcp import FastMCP
 import boto3
 import time
+from .retry import generate_retry_delays
 
 mcp = FastMCP("StatsCan")
 athena = boto3.client('athena', region_name='us-east-2')
 
+# Imperative Shell
 @mcp.tool
 def query(sql: str) -> dict:
     """Query StatsCan data warehouse with SQL"""
@@ -14,12 +16,19 @@ def query(sql: str) -> dict:
         ResultConfiguration={'OutputLocation': 's3://athena-queries-akhil1710/'}
     )['QueryExecutionId']
 
-    while True:
+    delays = generate_retry_delays(max_retries=20)
+
+    for i, delay in enumerate(delays):
         status = athena.get_query_execution(QueryExecutionId=exec_id)
         state = status['QueryExecution']['Status']['State']
+
         if state not in ['QUEUED', 'RUNNING']:
             break
-        time.sleep(1)
+
+        if i < len(delays) - 1:
+            time.sleep(delay)
+    else:
+        raise TimeoutError(f"Query timeout after {sum(delays):.0f}s")
 
     if state != 'SUCCEEDED':
         raise Exception(status['QueryExecution']['Status'].get('StateChangeReason', state))
