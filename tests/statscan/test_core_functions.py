@@ -351,6 +351,44 @@ class TestFindCsvInZip:
 
         assert result == 'archive/datasets/12100163.csv'
 
+    def test_skips_metadata_csv(self):
+        """Test that MetaData CSV is skipped when data CSV exists."""
+        namelist = ['98100137_MetaData.csv', '98100137.csv']
+        result = ingest.find_csv_in_zip(namelist)
+
+        assert result == '98100137.csv'
+
+    def test_skips_metadata_csv_reverse_order(self):
+        """Test MetaData skipping works regardless of order."""
+        namelist = ['98100137.csv', '98100137_MetaData.csv']
+        result = ingest.find_csv_in_zip(namelist)
+
+        assert result == '98100137.csv'
+
+    def test_metadata_fallback(self):
+        """Test that MetaData CSV is returned if it's the only CSV."""
+        namelist = ['98100137_MetaData.csv', 'readme.txt']
+        result = ingest.find_csv_in_zip(namelist)
+
+        assert result == '98100137_MetaData.csv'
+
+    def test_skips_metadata_with_multiple_data_csvs(self):
+        """Test that first non-metadata CSV is returned when multiple exist."""
+        namelist = ['12100163_MetaData.csv', '12100163.csv', '43100050.csv']
+        result = ingest.find_csv_in_zip(namelist)
+
+        # Should return first data CSV (not metadata)
+        assert result == '12100163.csv'
+
+    def test_metadata_case_sensitivity(self):
+        """Test that MetaData filtering is case-sensitive."""
+        # 'metadata' (lowercase) should NOT be filtered
+        namelist = ['data_metadata.csv', 'data.csv']
+        result = ingest.find_csv_in_zip(namelist)
+
+        # Should return first CSV since 'metadata' != 'MetaData'
+        assert result == 'data_metadata.csv'
+
 
 class TestFilterCatalog:
     """Test catalog filtering logic (the critical function)."""
@@ -661,3 +699,102 @@ class TestShouldPrintProgress:
         """Test at start (0%) - should not print yet."""
         result = ingest.should_print_progress(0, -1, interval=10)
         assert result is False  # 0 < -1 + 10, so not ready to print
+
+
+class TestCreateParseOptions:
+    """Test PyArrow ParseOptions creation for robust CSV parsing."""
+
+    def test_returns_parse_options_object(self):
+        """Test that function returns ParseOptions instance."""
+        import pyarrow.csv as pa_csv
+        result = ingest.create_parse_options()
+        assert isinstance(result, pa_csv.ParseOptions)
+
+    def test_enables_newlines_in_values(self):
+        """Test that newlines_in_values is enabled (handles multiline cells)."""
+        result = ingest.create_parse_options()
+        assert result.newlines_in_values is True
+
+    def test_enables_ignore_empty_lines(self):
+        """Test that ignore_empty_lines is enabled."""
+        result = ingest.create_parse_options()
+        assert result.ignore_empty_lines is True
+
+
+class TestCreateReadOptions:
+    """Test PyArrow ReadOptions creation."""
+
+    def test_returns_read_options_object(self):
+        """Test that function returns ReadOptions instance."""
+        import pyarrow.csv as pa_csv
+        result = ingest.create_read_options()
+        assert isinstance(result, pa_csv.ReadOptions)
+
+    def test_sets_utf8_encoding(self):
+        """Test that UTF-8 encoding is configured."""
+        result = ingest.create_read_options()
+        assert result.encoding == 'utf8'
+
+
+class TestValidateZipMagicBytes:
+    """Test ZIP file validation using magic bytes."""
+
+    def test_valid_zip_file(self, tmp_path):
+        """Test that valid ZIP file passes validation."""
+        import zipfile
+
+        # Create a valid ZIP file
+        zip_path = tmp_path / "test.zip"
+        with zipfile.ZipFile(zip_path, 'w') as z:
+            z.writestr("test.txt", "content")
+
+        # Should not raise
+        ingest.validate_zip_magic_bytes(zip_path)
+
+    def test_invalid_file_raises_error(self, tmp_path):
+        """Test that non-ZIP file raises ValueError."""
+        import pytest
+
+        # Create a text file (not a ZIP)
+        file_path = tmp_path / "not_a_zip.txt"
+        file_path.write_text("This is not a ZIP file")
+
+        # Should raise ValueError
+        with pytest.raises(ValueError, match="Not a valid ZIP file"):
+            ingest.validate_zip_magic_bytes(file_path)
+
+    def test_empty_file_raises_error(self, tmp_path):
+        """Test that empty file raises ValueError."""
+        import pytest
+
+        # Create empty file
+        file_path = tmp_path / "empty.zip"
+        file_path.write_bytes(b"")
+
+        # Should raise ValueError
+        with pytest.raises(ValueError, match="Not a valid ZIP file"):
+            ingest.validate_zip_magic_bytes(file_path)
+
+    def test_html_error_page_raises_error(self, tmp_path):
+        """Test that HTML error page (common API failure) raises ValueError."""
+        import pytest
+
+        # Create file with HTML content (simulates API error response)
+        file_path = tmp_path / "error.zip"
+        file_path.write_text("<!DOCTYPE html><html><body>Error 404</body></html>")
+
+        # Should raise ValueError with helpful message
+        with pytest.raises(ValueError, match="StatsCan API may have returned an error page"):
+            ingest.validate_zip_magic_bytes(file_path)
+
+    def test_partial_zip_magic_raises_error(self, tmp_path):
+        """Test that file with incomplete ZIP magic bytes raises ValueError."""
+        import pytest
+
+        # Create file with only partial ZIP magic (corrupted download)
+        file_path = tmp_path / "partial.zip"
+        file_path.write_bytes(b"PK\x03")  # Only 3 bytes, need 4
+
+        # Should raise ValueError
+        with pytest.raises(ValueError, match="Not a valid ZIP file"):
+            ingest.validate_zip_magic_bytes(file_path)

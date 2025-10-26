@@ -113,16 +113,24 @@ def _do_csv_conversion(csv_path, output_path):
     string_schema = create_string_schema(sanitized_columns)
     null_values = get_statscan_null_values()
     column_types = create_column_type_map(original_columns)
+    parse_options = create_parse_options()
+    read_options = create_read_options()
 
-    # Configure CSV parsing
+    # Configure CSV parsing with robust options
     convert_options = pa_csv.ConvertOptions(
         null_values=null_values,
         strings_can_be_null=True,
-        column_types=column_types
+        column_types=column_types,
+        include_missing_columns=True  # Handle column count mismatches
     )
 
-    # I/O: Stream CSV to parquet
-    with pa_csv.open_csv(csv_path, convert_options=convert_options) as reader:
+    # I/O: Stream CSV to parquet with robust parsing
+    with pa_csv.open_csv(
+        csv_path,
+        parse_options=parse_options,
+        convert_options=convert_options,
+        read_options=read_options
+    ) as reader:
         with pq.ParquetWriter(output_path, string_schema) as writer:
             for batch in reader:
                 # Core: Rename columns using pure function
@@ -256,14 +264,62 @@ def rename_batch_columns(batch, schema):
     )
 
 
+def create_parse_options():
+    """Create PyArrow ParseOptions for robust CSV parsing.
+
+    Returns:
+        PyArrow ParseOptions configured to handle:
+        - Multiline cell values (newlines within quoted fields)
+        - Empty lines in CSV files
+    """
+    import pyarrow.csv as pa_csv
+    return pa_csv.ParseOptions(
+        newlines_in_values=True,  # Handle newlines within quoted fields
+        ignore_empty_lines=True   # Skip empty lines in CSV
+    )
+
+
+def create_read_options():
+    """Create PyArrow ReadOptions for CSV reading.
+
+    Returns:
+        PyArrow ReadOptions with UTF-8 encoding
+    """
+    import pyarrow.csv as pa_csv
+    return pa_csv.ReadOptions(
+        encoding='utf8'
+    )
+
+
+def validate_zip_magic_bytes(file_path):
+    """Validate that file is a valid ZIP archive by checking magic bytes.
+
+    Args:
+        file_path: Path to file to validate (str or Path)
+
+    Returns:
+        None if valid
+
+    Raises:
+        ValueError: If file is not a valid ZIP archive
+    """
+    with open(file_path, 'rb') as f:
+        magic = f.read(4)
+        if magic != b'PK\x03\x04':
+            raise ValueError(
+                f"Not a valid ZIP file (magic bytes: {magic.hex() if magic else 'empty'}). "
+                f"StatsCan API may have returned an error page instead of dataset."
+            )
+
+
 def find_csv_in_zip(namelist):
-    """Find CSV file in ZIP archive namelist.
+    """Find data CSV file in ZIP archive, skipping metadata files.
 
     Args:
         namelist: List of filenames from ZipFile.namelist()
 
     Returns:
-        First CSV filename found
+        CSV filename to process (data file, not metadata)
 
     Raises:
         ValueError: If no CSV file found or namelist is empty
@@ -276,7 +332,11 @@ def find_csv_in_zip(namelist):
     if not csv_files:
         raise ValueError(f"No CSV file found in ZIP. Files: {namelist}")
 
-    return csv_files[0]
+    # Skip MetaData CSV files (e.g., '98100137_MetaData.csv')
+    data_csvs = [f for f in csv_files if 'MetaData' not in f]
+
+    # Prefer data CSV, fallback to first CSV if all are metadata
+    return data_csvs[0] if data_csvs else csv_files[0]
 
 
 def convert_csv_to_parquet(csv_path, output_path):
@@ -359,7 +419,12 @@ def download_table(product_id, title):
 
         zip_path = tmp_zip.name
 
-    print(f"{display_title} - Downloaded, extracting...")
+    print(f"{display_title} - Downloaded, validating...")
+
+    # Core: Validate ZIP file before extraction
+    validate_zip_magic_bytes(zip_path)
+
+    print(f"{display_title} - Extracting...")
 
     # Extract CSV to temp directory
     with tempfile.TemporaryDirectory() as tmp_dir:
